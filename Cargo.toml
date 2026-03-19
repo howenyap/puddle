@@ -1,6 +1,32 @@
-[workspace]
-resolver = "2"
-members = [
-  "crates/library",
-  "crates/cli",
-]
+[package]
+name = "puddle-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "CLI for Raindrop.io"
+repository = "https://github.com/howenyap/puddle"
+
+[lib]
+name = "puddle"
+path = "lib/lib.rs"
+
+[[bin]]
+name = "puddle"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4.44", features = ["serde"] }
+clap = { version = "4.5.60", features = ["derive"] }
+dotenvy = "0.15.7"
+mime = "0.3.17"
+mime_guess = "2.0.5"
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "multipart", "form", "query", "rustls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+thiserror = "2.0.18"
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+toml = "1"
+url = "2.5.8"
+
+[dev-dependencies]
+wiremock = "0.6.5"
