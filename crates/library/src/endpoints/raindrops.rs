@@ -134,7 +134,7 @@ impl RaindropsApi {
         collection_id: CollectionScope,
         params: &RaindropListParams,
     ) -> Result<Response<ItemsResponse<Raindrop>>, Error> {
-        let path = format!("raindrops/{}", collection_id);
+        let path = format!("raindrops/{}", i64::from(collection_id));
         let res = self
             .client
             .send_json::<ItemsResponse<Raindrop>, _, ()>(Method::GET, &path, Some(params), None)
@@ -177,7 +177,7 @@ impl RaindropsApi {
         payload: &UpdateManyRaindrops,
         params: Option<&UpdateManyParams>,
     ) -> Result<Response<u64>, Error> {
-        let path = format!("raindrops/{}", collection_id);
+        let path = format!("raindrops/{}", i64::from(collection_id));
         #[derive(serde::Serialize)]
         struct Body<'a> {
             ids: Vec<i64>,
@@ -211,7 +211,7 @@ impl RaindropsApi {
         payload: &DeleteManyRaindrops,
         params: Option<&DeleteManyParams>,
     ) -> Result<Response<bool>, Error> {
-        let path = format!("raindrops/{}", collection_id);
+        let path = format!("raindrops/{}", i64::from(collection_id));
         let res = self
             .client
             .send_json::<BoolResponse, _, _>(Method::DELETE, &path, params, Some(payload))

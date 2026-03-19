@@ -95,6 +95,39 @@ async fn encodes_query_params_for_raindrop_list() {
 }
 
 #[tokio::test]
+async fn raindrops_list_uses_system_collection_wire_id() {
+    let server = MockServer::start().await;
+
+    let body = serde_json::json!({
+        "result": true,
+        "items": [],
+        "count": 0
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/raindrops/-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = RaindropClient::builder()
+        .access_token("test-token")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+
+    let list = client
+        .raindrops()
+        .list(CollectionScope::Unsorted, &RaindropListParams::new())
+        .await
+        .unwrap()
+        .data;
+
+    assert_eq!(Some(0), list.count);
+    assert_eq!(0, list.items.len());
+}
+
+#[tokio::test]
 async fn raindrops_get_parses_item_envelope_with_underscore_id() {
     let server = MockServer::start().await;
 
@@ -195,6 +228,32 @@ async fn collections_get_root_uses_special_root_collection_id() {
     let root = client.collections().get_root().await.unwrap().data;
     assert_eq!(-1, root.id);
     assert_eq!(Some(""), root.title.as_deref());
+}
+
+#[tokio::test]
+async fn collections_get_uses_system_collection_wire_id() {
+    let server = MockServer::start().await;
+
+    let body = serde_json::json!({
+        "result": true,
+        "item": {"_id": -99, "title": "Trash"}
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/collection/-99"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = RaindropClient::builder()
+        .access_token("test-token")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+
+    let trash = client.collections().get(CollectionScope::Trash).await.unwrap().data;
+    assert_eq!(-99, trash.id);
+    assert_eq!(Some("Trash"), trash.title.as_deref());
 }
 
 #[tokio::test]

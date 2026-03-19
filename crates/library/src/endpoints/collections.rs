@@ -52,7 +52,7 @@ impl CollectionsApi {
     }
 
     pub async fn get(&self, id: CollectionScope) -> Result<Response<Collection>, Error> {
-        let path = format!("collection/{}", id);
+        let path = format!("collection/{}", i64::from(id));
         let res = self
             .client
             .send_json::<ItemResponse<Collection>, (), ()>(Method::GET, &path, None, None)
