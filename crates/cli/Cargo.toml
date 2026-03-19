@@ -1,0 +1,19 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "puddle"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.60", features = ["derive"] }
+dotenvy = "0.15.7"
+mime = "0.3.17"
+mime_guess = "2.0.5"
+puddle = { path = "../library" }
+serde_json = "1.0.145"
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+toml = "1"
+url = "2.5.8"
