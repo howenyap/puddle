@@ -121,16 +121,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_setup() -> Result<(), Box<dyn std::error::Error>> {
-    println!(
-        "Create a new app at {}",
-        terminal_link("Raindrop integrations", RAINDROP_INTEGRATIONS_URI),
-    );
+    println!("Create a new app at Raindrop integrations: {RAINDROP_INTEGRATIONS_URI}\n");
     println!(
         "Use this redirect URI: {}",
-        terminal_link(
-            DEFAULT_OAUTH_DEBUG_REDIRECT_URI,
-            DEFAULT_OAUTH_DEBUG_REDIRECT_URI,
-        )
+        DEFAULT_OAUTH_DEBUG_REDIRECT_URI
     );
     let client_id = prompt_required("\nClient ID")?;
     let client_secret = prompt_required("Client Secret")?;
@@ -168,9 +162,6 @@ async fn run_setup() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nYou're all set.");
 
     Ok(())
-}
-fn terminal_link(label: &str, url: &str) -> String {
-    format!("\x1b]8;;{url}\x1b\\{label}\x1b]8;;\x1b\\")
 }
 
 fn prompt_required(label: &str) -> io::Result<String> {
