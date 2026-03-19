@@ -1,4 +1,8 @@
 # Installation
+## Homebrew
+`brew tap howenyap/tap`
+`brew install puddle`
+
 ## Cargo
 `cargo install puddle-cli`
 
