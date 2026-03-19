@@ -251,7 +251,12 @@ async fn collections_get_uses_system_collection_wire_id() {
         .build()
         .unwrap();
 
-    let trash = client.collections().get(CollectionScope::Trash).await.unwrap().data;
+    let trash = client
+        .collections()
+        .get(CollectionScope::Trash)
+        .await
+        .unwrap()
+        .data;
     assert_eq!(-99, trash.id);
     assert_eq!(Some("Trash"), trash.title.as_deref());
 }
