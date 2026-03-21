@@ -1,12 +1,13 @@
 use crate::app::CliApp;
 use crate::common::{display_text, read_upload_file};
 use clap::Args;
+use puddle::RaindropClient;
 use puddle::models::common::{CollectionScope, ItemsResponse};
 use puddle::models::raindrops::{
     CollectionRef, CreateRaindrop, DeleteManyRaindrops, Raindrop, RaindropListParams,
     UpdateManyParams, UpdateManyRaindrops, UpdateRaindrop,
 };
-use puddle::pagination::PageParams;
+use puddle::pagination::{MAX_PER_PAGE, PageParams};
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
@@ -101,6 +102,16 @@ pub(crate) struct DeleteManyArgs {
     pub(crate) collection_id: CollectionScope,
     #[arg(long = "id", required = true)]
     pub(crate) ids: Vec<i64>,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub(crate) struct ExportArgs {
+    #[arg(
+        long,
+        default_value = "export.json",
+        help = "Path to write the exported bookmarks JSON"
+    )]
+    pub(crate) output: PathBuf,
 }
 
 impl CliApp {
@@ -262,6 +273,18 @@ impl CliApp {
 
         Ok(())
     }
+
+    pub(crate) async fn export(&self, args: ExportArgs) -> Result<(), Box<dyn std::error::Error>> {
+        let items = fetch_all_raindrops(&self.client).await?;
+        write_raindrop_export(&args.output, &items)?;
+        println!(
+            "exported {} raindrops to {}",
+            items.len(),
+            args.output.display()
+        );
+
+        Ok(())
+    }
 }
 
 fn create_payload(args: CreateArgs) -> CreateRaindrop {
@@ -378,12 +401,51 @@ fn format_raindrop_summary(item: &Raindrop) -> String {
     parts.join(" | ")
 }
 
+async fn fetch_all_raindrops(
+    client: &RaindropClient,
+) -> Result<Vec<Raindrop>, Box<dyn std::error::Error>> {
+    let mut page = 1;
+    let mut all_items = Vec::new();
+
+    loop {
+        let params = RaindropListParams::new().page(page).per_page(MAX_PER_PAGE);
+        let response = client
+            .raindrops()
+            .list(CollectionScope::All, &params)
+            .await?;
+        let mut items = response.data.items;
+        let item_count = items.len();
+
+        all_items.append(&mut items);
+
+        if item_count < MAX_PER_PAGE as usize {
+            break;
+        }
+
+        page += 1;
+    }
+
+    Ok(all_items)
+}
+
+fn write_raindrop_export(
+    output_path: &std::path::Path,
+    items: &[Raindrop],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let json = serde_json::to_string_pretty(items)?;
+    std::fs::write(output_path, format!("{json}\n"))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Cli, Command};
     use clap::Parser;
     use std::collections::HashMap;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn parses_top_level_list_command() {
@@ -441,6 +503,30 @@ mod tests {
                 excerpt: Some("Notes".to_string()),
                 tags: vec!["rust".to_string(), "cli".to_string()],
                 collection: Some(42),
+            })),
+            cli.command
+        );
+    }
+
+    #[test]
+    fn parses_top_level_export_command() {
+        let cli = Cli::try_parse_from(["puddle", "export", "--output", "bookmarks.json"]).unwrap();
+
+        assert_eq!(
+            Some(Command::Export(ExportArgs {
+                output: PathBuf::from("bookmarks.json"),
+            })),
+            cli.command
+        );
+    }
+
+    #[test]
+    fn export_defaults_output_path() {
+        let cli = Cli::try_parse_from(["puddle", "export"]).unwrap();
+
+        assert_eq!(
+            Some(Command::Export(ExportArgs {
+                output: PathBuf::from("export.json"),
             })),
             cli.command
         );
@@ -632,5 +718,71 @@ mod tests {
         let actual = format_next_page_hint(1);
 
         assert_eq!("Hint: use\n`--page 2` for the next page", actual);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_raindrops_collects_paginated_results() {
+        let server = MockServer::start().await;
+
+        let first_page_items = (1..=25)
+            .map(|id| {
+                serde_json::json!({
+                    "_id": id,
+                    "title": format!("Item {id}"),
+                    "link": format!("https://example.com/{id}"),
+                    "tags": []
+                })
+            })
+            .collect::<Vec<_>>();
+        let second_page_items = vec![
+            serde_json::json!({
+                "_id": 26,
+                "title": "Item 26",
+                "link": "https://example.com/26",
+                "tags": ["export"]
+            }),
+            serde_json::json!({
+                "_id": 27,
+                "title": "Item 27",
+                "link": "https://example.com/27",
+                "tags": []
+            }),
+        ];
+
+        Mock::given(method("GET"))
+            .and(path("/raindrops/0"))
+            .and(query_param("page", "1"))
+            .and(query_param("perpage", "25"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": true,
+                "items": first_page_items,
+                "count": 25
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/raindrops/0"))
+            .and(query_param("page", "2"))
+            .and(query_param("perpage", "25"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": true,
+                "items": second_page_items,
+                "count": 2
+            })))
+            .mount(&server)
+            .await;
+
+        let client = RaindropClient::builder()
+            .access_token("test-token")
+            .base_url(server.uri())
+            .build()
+            .unwrap();
+
+        let items = fetch_all_raindrops(&client).await.unwrap();
+
+        assert_eq!(27, items.len());
+        assert_eq!(1, items[0].id);
+        assert_eq!(27, items[26].id);
     }
 }

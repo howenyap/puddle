@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub const MAX_PER_PAGE: u32 = 25;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PageParams {
     #[serde(skip_serializing_if = "Option::is_none")]

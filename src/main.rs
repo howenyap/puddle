@@ -14,8 +14,8 @@ use crate::constants::{
     AUTHORIZE_URL_BASE, DEFAULT_OAUTH_DEBUG_REDIRECT_URI, RAINDROP_INTEGRATIONS_URI,
 };
 use crate::raindrops::{
-    CreateArgs, CreateManyArgs, DeleteArgs, DeleteManyArgs, GetArgs, ListArgs, UpdateArgs,
-    UpdateManyArgs, UploadCoverArgs, UploadFileArgs,
+    CreateArgs, CreateManyArgs, DeleteArgs, DeleteManyArgs, ExportArgs, GetArgs, ListArgs,
+    UpdateArgs, UpdateManyArgs, UploadCoverArgs, UploadFileArgs,
 };
 use clap::{CommandFactory, Parser, Subcommand};
 use puddle::auth::oauth;
@@ -51,6 +51,8 @@ enum Command {
     UpdateMany(UpdateManyArgs),
     #[command(about = "Delete multiple raindrops")]
     DeleteMany(DeleteManyArgs),
+    #[command(about = "Export all raindrops to a JSON file")]
+    Export(ExportArgs),
     #[command(about = "Collection operations")]
     Collections {
         #[command(subcommand)]
@@ -108,6 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Command::CreateMany(args) => app.create_many(args).await?,
                 Command::UpdateMany(args) => app.update_many(args).await?,
                 Command::DeleteMany(args) => app.delete_many(args).await?,
+                Command::Export(args) => app.export(args).await?,
                 Command::Collections { command } => app.run_collections(command).await?,
                 Command::Tags { command } => app.run_tags(command).await?,
                 Command::User { command } => app.run_user(command).await?,
