@@ -11,6 +11,36 @@ use puddle::pagination::{MAX_PER_PAGE, PageParams};
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
+use std::str::FromStr;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CliPage(u32);
+
+impl CliPage {
+    fn as_display(self) -> u32 {
+        self.0
+    }
+
+    fn to_api_page(self) -> u32 {
+        self.0 - 1
+    }
+}
+
+impl FromStr for CliPage {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let page = value
+            .parse::<u32>()
+            .map_err(|_| format!("invalid value '{value}' for '--page <PAGE>'"))?;
+
+        if page == 0 {
+            return Err("page must be at least 1".to_string());
+        }
+
+        Ok(Self(page))
+    }
+}
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub(crate) struct ListArgs {
@@ -21,7 +51,7 @@ pub(crate) struct ListArgs {
     #[arg(long, allow_hyphen_values = true)]
     pub(crate) sort: Option<String>,
     #[arg(long)]
-    pub(crate) page: Option<u32>,
+    pub(crate) page: Option<CliPage>,
     #[arg(long = "per-page")]
     pub(crate) per_page: Option<u32>,
     #[arg(long)]
@@ -112,14 +142,16 @@ pub(crate) struct ExportArgs {
         help = "Path to write the exported bookmarks JSON"
     )]
     pub(crate) output: PathBuf,
+    #[arg(long, allow_hyphen_values = true)]
+    pub(crate) collection: Option<CollectionScope>,
 }
 
 impl CliApp {
     pub(crate) async fn list(&self, args: ListArgs) -> Result<(), Box<dyn std::error::Error>> {
-        let current_page = args.page.unwrap_or(1);
+        let current_page = args.page.map(CliPage::as_display).unwrap_or(1);
         let params = RaindropListParams {
             page: PageParams {
-                page: args.page,
+                page: args.page.map(CliPage::to_api_page),
                 per_page: args.per_page,
             },
             search: args.search,
@@ -275,7 +307,8 @@ impl CliApp {
     }
 
     pub(crate) async fn export(&self, args: ExportArgs) -> Result<(), Box<dyn std::error::Error>> {
-        let items = fetch_all_raindrops(&self.client).await?;
+        let collection_id = args.collection.unwrap_or_default();
+        let items = fetch_all_raindrops(&self.client, collection_id).await?;
         write_raindrop_export(&args.output, &items)?;
         println!(
             "exported {} raindrops to {}",
@@ -403,15 +436,16 @@ fn format_raindrop_summary(item: &Raindrop) -> String {
 
 async fn fetch_all_raindrops(
     client: &RaindropClient,
+    collection_id: CollectionScope,
 ) -> Result<Vec<Raindrop>, Box<dyn std::error::Error>> {
-    let mut page = 1;
+    let mut page = 0;
     let mut all_items = Vec::new();
 
     loop {
         let params = RaindropListParams::new().page(page).per_page(MAX_PER_PAGE);
         let response = client
             .raindrops()
-            .list(CollectionScope::All, &params)
+            .list(collection_id, &params)
             .await?;
         let mut items = response.data.items;
         let item_count = items.len();
@@ -469,7 +503,7 @@ mod tests {
                 collection: None,
                 search: Some("rust".to_string()),
                 sort: Some("-created".to_string()),
-                page: Some(2),
+                page: Some(CliPage(2)),
                 per_page: Some(25),
                 nested: true,
             })),
@@ -510,11 +544,20 @@ mod tests {
 
     #[test]
     fn parses_top_level_export_command() {
-        let cli = Cli::try_parse_from(["puddle", "export", "--output", "bookmarks.json"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "puddle",
+            "export",
+            "--collection",
+            "42",
+            "--output",
+            "bookmarks.json",
+        ])
+        .unwrap();
 
         assert_eq!(
             Some(Command::Export(ExportArgs {
                 output: PathBuf::from("bookmarks.json"),
+                collection: Some(CollectionScope::id(42).unwrap()),
             })),
             cli.command
         );
@@ -527,9 +570,33 @@ mod tests {
         assert_eq!(
             Some(Command::Export(ExportArgs {
                 output: PathBuf::from("export.json"),
+                collection: None,
             })),
             cli.command
         );
+    }
+
+    #[test]
+    fn parses_named_collection_scope_for_export() {
+        let cli = Cli::try_parse_from(["puddle", "export", "--collection", "Unsorted"]).unwrap();
+
+        assert_eq!(
+            Some(Command::Export(ExportArgs {
+                output: PathBuf::from("export.json"),
+                collection: Some(CollectionScope::Unsorted),
+            })),
+            cli.command
+        );
+    }
+
+    #[test]
+    fn export_defaults_to_all_collection() {
+        let args = ExportArgs {
+            output: PathBuf::from("export.json"),
+            collection: None,
+        };
+
+        assert_eq!(CollectionScope::All, args.collection.unwrap_or_default());
     }
 
     #[test]
@@ -720,6 +787,26 @@ mod tests {
         assert_eq!("Hint: use\n`--page 2` for the next page", actual);
     }
 
+    #[test]
+    fn translates_cli_page_numbers_to_api_page_numbers() {
+        assert_eq!(0, CliPage(1).to_api_page());
+        assert_eq!(1, CliPage(2).to_api_page());
+        assert_eq!(4, CliPage(5).to_api_page());
+    }
+
+    #[test]
+    fn cli_page_keeps_display_values_one_indexed() {
+        assert_eq!(1, CliPage(1).as_display());
+        assert_eq!(2, CliPage(2).as_display());
+    }
+
+    #[test]
+    fn rejects_zero_page_for_list() {
+        let cli = Cli::try_parse_from(["puddle", "list", "--page", "0"]);
+
+        assert!(cli.is_err());
+    }
+
     #[tokio::test]
     async fn fetch_all_raindrops_collects_paginated_results() {
         let server = MockServer::start().await;
@@ -751,7 +838,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/raindrops/0"))
-            .and(query_param("page", "1"))
+            .and(query_param("page", "0"))
             .and(query_param("perpage", "25"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "result": true,
@@ -763,7 +850,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/raindrops/0"))
-            .and(query_param("page", "2"))
+            .and(query_param("page", "1"))
             .and(query_param("perpage", "25"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "result": true,
@@ -779,10 +866,41 @@ mod tests {
             .build()
             .unwrap();
 
-        let items = fetch_all_raindrops(&client).await.unwrap();
+        let items = fetch_all_raindrops(&client, CollectionScope::All)
+            .await
+            .unwrap();
 
         assert_eq!(27, items.len());
         assert_eq!(1, items[0].id);
         assert_eq!(27, items[26].id);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_raindrops_uses_requested_collection_scope() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/raindrops/-1"))
+            .and(query_param("page", "0"))
+            .and(query_param("perpage", "25"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": true,
+                "items": [],
+                "count": 0
+            })))
+            .mount(&server)
+            .await;
+
+        let client = RaindropClient::builder()
+            .access_token("test-token")
+            .base_url(server.uri())
+            .build()
+            .unwrap();
+
+        let items = fetch_all_raindrops(&client, CollectionScope::Unsorted)
+            .await
+            .unwrap();
+
+        assert_eq!(0, items.len());
     }
 }

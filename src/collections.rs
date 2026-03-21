@@ -8,10 +8,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
 pub(crate) enum CollectionsCommand {
-    #[command(about = "Get the root collection")]
-    Root,
-    #[command(about = "List child collections")]
-    Children,
+    #[command(about = "List collections")]
+    List,
     #[command(about = "Get a collection by ID")]
     Get(GetCollectionArgs),
     #[command(about = "Create a collection")]
@@ -66,8 +64,7 @@ impl CliApp {
         command: CollectionsCommand,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match command {
-            CollectionsCommand::Root => self.collections_root().await,
-            CollectionsCommand::Children => self.collections_children().await,
+            CollectionsCommand::List => self.collections_list().await,
             CollectionsCommand::Get(args) => self.collections_get(args).await,
             CollectionsCommand::Create(args) => self.collections_create(args).await,
             CollectionsCommand::Update(args) => self.collections_update(args).await,
@@ -76,14 +73,7 @@ impl CliApp {
         }
     }
 
-    async fn collections_root(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let response = self.client.collections().get_root().await?;
-        print_collection_detail(&response.data);
-
-        Ok(())
-    }
-
-    async fn collections_children(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn collections_list(&self) -> Result<(), Box<dyn std::error::Error>> {
         let response = self.client.collections().get_children().await?;
         print_collection_list(&response.data);
 
@@ -241,6 +231,18 @@ mod tests {
                 command: CollectionsCommand::Get(GetCollectionArgs {
                     id: CollectionScope::Unsorted,
                 }),
+            }),
+            cli.command
+        );
+    }
+
+    #[test]
+    fn parses_collections_list_command() {
+        let cli = Cli::try_parse_from(["puddle", "collections", "list"]).unwrap();
+
+        assert_eq!(
+            Some(Command::Collections {
+                command: CollectionsCommand::List,
             }),
             cli.command
         );
