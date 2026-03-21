@@ -63,11 +63,8 @@ enum Command {
         #[command(subcommand)]
         command: tags::TagsCommand,
     },
-    #[command(about = "User operations")]
-    User {
-        #[command(subcommand)]
-        command: user::UserCommand,
-    },
+    #[command(about = "Show the authenticated user")]
+    Me,
     #[command(about = "Filter operations")]
     Filters {
         #[command(subcommand)]
@@ -113,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Command::Export(args) => app.export(args).await?,
                 Command::Collections { command } => app.run_collections(command).await?,
                 Command::Tags { command } => app.run_tags(command).await?,
-                Command::User { command } => app.run_user(command).await?,
+                Command::Me => app.user_me().await?,
                 Command::Filters { command } => app.run_filters(command).await?,
                 Command::Setup | Command::Config => unreachable!(),
             }

@@ -1,25 +1,9 @@
 use crate::app::CliApp;
-use clap::Subcommand;
 use puddle::models::user::User;
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
-pub(crate) enum UserCommand {
-    #[command(about = "Show the authenticated user")]
-    Me,
-}
-
 impl CliApp {
-    pub(crate) async fn run_user(
-        &self,
-        command: UserCommand,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        match command {
-            UserCommand::Me => self.user_me().await,
-        }
-    }
-
-    async fn user_me(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) async fn user_me(&self) -> Result<(), Box<dyn std::error::Error>> {
         let response = self.client.user().me().await?;
         println!("{}", UserDisplay(&response.data));
         Ok(())
