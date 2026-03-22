@@ -3,8 +3,9 @@ use puddle::{
     models::{
         collections::{CreateCollection, UpdateCollection},
         common::CollectionScope,
-        raindrops::{RaindropListParams, UpdateManyParams, UpdateManyRaindrops},
+        raindrops::{RaindropId, RaindropListParams, UpdateManyRaindrops},
     },
+    pagination::PerPage,
 };
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -34,6 +35,44 @@ async fn injects_auth_header_and_calls_user() {
     let me = client.user().me().await.unwrap().data;
     assert_eq!(1, me.id);
     assert_eq!(Some("dev@example.com"), me.email.as_deref());
+}
+
+#[tokio::test]
+async fn user_me_maps_success_status_error_payload() {
+    let server = MockServer::start().await;
+
+    let body = serde_json::json!({
+        "result": false,
+        "error": "session_expired",
+        "errorMessage": "session expired"
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = RaindropClient::builder()
+        .access_token("test-token")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+
+    let err = client.user().me().await.unwrap_err();
+    match err {
+        Error::Api {
+            status,
+            code,
+            message,
+            ..
+        } => {
+            assert_eq!(200, status.as_u16());
+            assert_eq!(Some("session_expired"), code.as_deref());
+            assert_eq!("session expired", message);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -76,7 +115,7 @@ async fn encodes_query_params_for_raindrop_list() {
         .sort("-created")
         .nested(true)
         .page(2)
-        .per_page(25);
+        .per_page(PerPage::new_unchecked(25));
 
     let list = client
         .raindrops()
@@ -86,7 +125,7 @@ async fn encodes_query_params_for_raindrop_list() {
         .data;
     assert_eq!(Some(1), list.count);
     assert_eq!(1, list.items.len());
-    assert_eq!(42, list.items[0].id);
+    assert_eq!(RaindropId::new(42), list.items[0].id);
     assert_eq!(Some("Rust article"), list.items[0].title.as_deref());
     assert_eq!(
         Some(-1),
@@ -154,8 +193,8 @@ async fn raindrops_get_parses_item_envelope_with_underscore_id() {
         .build()
         .unwrap();
 
-    let item = client.raindrops().get(314).await.unwrap().data;
-    assert_eq!(314, item.id);
+    let item = client.raindrops().get(RaindropId::new(314)).await.unwrap().data;
+    assert_eq!(RaindropId::new(314), item.id);
     assert_eq!(Some("Detailed entry"), item.title.as_deref());
     assert_eq!(Some("https://example.com/detail"), item.link.as_deref());
     assert_eq!(Some(7), item.collection.as_ref().map(|value| value.id));
@@ -202,6 +241,34 @@ async fn maps_api_error_payload() {
         }
         other => panic!("unexpected error: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn tags_rename_preserves_false_bool_response_on_success_status() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("PUT"))
+        .and(path("/tags/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": false
+        })))
+        .mount(&server)
+        .await;
+
+    let client = RaindropClient::builder()
+        .access_token("test-token")
+        .base_url(server.uri())
+        .build()
+        .unwrap();
+
+    let result = client
+        .tags()
+        .rename(10, "api", "backend")
+        .await
+        .unwrap()
+        .data;
+
+    assert_eq!(false, result);
 }
 
 #[tokio::test]
@@ -553,15 +620,20 @@ async fn upload_endpoints_use_put_routes() {
         .await
         .unwrap()
         .data;
-    assert_eq!(55, uploaded.id);
+    assert_eq!(RaindropId::new(55), uploaded.id);
 
     let covered = client
         .raindrops()
-        .upload_cover(55, b"cover".to_vec(), mime::IMAGE_PNG, "cover.png")
+        .upload_cover(
+            RaindropId::new(55),
+            b"cover".to_vec(),
+            mime::IMAGE_PNG,
+            "cover.png",
+        )
         .await
         .unwrap()
         .data;
-    assert_eq!(55, covered.id);
+    assert_eq!(RaindropId::new(55), covered.id);
 
     let collection = client
         .collections()
@@ -600,12 +672,10 @@ async fn update_many_sends_ids_in_json_body_and_reads_modified_count() {
         .update_many(
             CollectionScope::id(7).unwrap(),
             &UpdateManyRaindrops {
+                ids: Some(vec![10, 12]),
                 tags: Some(vec!["rust".to_string()]),
                 ..Default::default()
             },
-            Some(&UpdateManyParams {
-                ids: Some("10,12".to_string()),
-            }),
         )
         .await
         .unwrap()

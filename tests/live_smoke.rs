@@ -1,4 +1,4 @@
-use puddle::{RaindropClient, models::common::CollectionScope};
+use puddle::{RaindropClient, models::common::CollectionScope, pagination::PerPage};
 
 #[tokio::test]
 async fn live_smoke_test() {
@@ -20,7 +20,8 @@ async fn live_smoke_test() {
         .raindrops()
         .list(
             CollectionScope::All,
-            &puddle::models::raindrops::RaindropListParams::new().per_page(1),
+            &puddle::models::raindrops::RaindropListParams::new()
+                .per_page(PerPage::new_unchecked(1)),
         )
         .await
         .expect("raindrops.list should succeed")

@@ -4,10 +4,10 @@ use clap::Args;
 use puddle::RaindropClient;
 use puddle::models::common::{CollectionScope, ItemsResponse};
 use puddle::models::raindrops::{
-    CollectionRef, CreateRaindrop, DeleteManyRaindrops, Raindrop, RaindropListParams,
-    UpdateManyParams, UpdateManyRaindrops, UpdateRaindrop,
+    CollectionRef, CreateRaindrop, DeleteManyRaindrops, Raindrop, RaindropId,
+    RaindropListParams, UpdateManyRaindrops, UpdateRaindrop,
 };
-use puddle::pagination::{MAX_PER_PAGE, PageParams};
+use puddle::pagination::{MAX_PER_PAGE, PageParams, PerPage};
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
@@ -53,14 +53,14 @@ pub(crate) struct ListArgs {
     #[arg(long)]
     pub(crate) page: Option<CliPage>,
     #[arg(long = "per-page")]
-    pub(crate) per_page: Option<u32>,
+    pub(crate) per_page: Option<PerPage>,
     #[arg(long)]
     pub(crate) nested: bool,
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub(crate) struct GetArgs {
-    pub(crate) id: i64,
+    pub(crate) id: RaindropId,
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
@@ -78,7 +78,7 @@ pub(crate) struct CreateArgs {
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub(crate) struct UpdateArgs {
-    pub(crate) id: i64,
+    pub(crate) id: RaindropId,
     #[arg(long)]
     pub(crate) title: Option<String>,
     #[arg(long)]
@@ -91,7 +91,7 @@ pub(crate) struct UpdateArgs {
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub(crate) struct DeleteArgs {
-    pub(crate) id: i64,
+    pub(crate) id: RaindropId,
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
@@ -101,7 +101,7 @@ pub(crate) struct UploadFileArgs {
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub(crate) struct UploadCoverArgs {
-    pub(crate) id: i64,
+    pub(crate) id: RaindropId,
     pub(crate) path: PathBuf,
 }
 
@@ -257,23 +257,15 @@ impl CliApp {
         args: UpdateManyArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let payload = UpdateManyRaindrops {
+            ids: Some(args.ids.clone()),
             collection: args.collection.map(collection_ref),
             tags: (!args.tags.is_empty()).then_some(args.tags),
             extra: HashMap::new(),
         };
-        let params = UpdateManyParams {
-            ids: Some(
-                args.ids
-                    .iter()
-                    .map(std::string::ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(","),
-            ),
-        };
         let response = self
             .client
             .raindrops()
-            .update_many(args.collection_id, &payload, Some(&params))
+            .update_many(args.collection_id, &payload)
             .await?;
         println!("modified: {}", response.data);
         println!(
@@ -293,13 +285,13 @@ impl CliApp {
         args: DeleteManyArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let payload = DeleteManyRaindrops {
-            ids: args.ids.clone(),
+            ids: Some(args.ids.clone()),
             extra: HashMap::new(),
         };
         let response = self
             .client
             .raindrops()
-            .delete_many(args.collection_id, &payload, None)
+            .delete_many(args.collection_id, &payload)
             .await?;
         println!("deleted: {}", response.data);
 
@@ -442,7 +434,9 @@ async fn fetch_all_raindrops(
     let mut all_items = Vec::new();
 
     loop {
-        let params = RaindropListParams::new().page(page).per_page(MAX_PER_PAGE);
+        let params = RaindropListParams::new()
+            .page(page)
+            .per_page(PerPage::new_unchecked(MAX_PER_PAGE));
         let response = client
             .raindrops()
             .list(collection_id, &params)
@@ -504,7 +498,7 @@ mod tests {
                 search: Some("rust".to_string()),
                 sort: Some("-created".to_string()),
                 page: Some(CliPage(2)),
-                per_page: Some(25),
+                per_page: Some(PerPage::new_unchecked(25)),
                 nested: true,
             })),
             cli.command
@@ -715,7 +709,7 @@ mod tests {
     #[test]
     fn formats_list_item_with_requested_fields() {
         let item = Raindrop {
-            id: 42,
+            id: RaindropId::new(42),
             title: Some("Rust article".to_string()),
             link: Some("https://example.com".to_string()),
             excerpt: None,
@@ -743,7 +737,7 @@ mod tests {
     #[test]
     fn formats_raindrop_detail_via_display() {
         let item = Raindrop {
-            id: 42,
+            id: RaindropId::new(42),
             title: Some("Rust article".to_string()),
             link: Some("https://example.com".to_string()),
             excerpt: Some("CLI notes".to_string()),
@@ -807,11 +801,25 @@ mod tests {
         assert!(cli.is_err());
     }
 
+    #[test]
+    fn rejects_zero_per_page_for_list() {
+        let cli = Cli::try_parse_from(["puddle", "list", "--per-page", "0"]);
+
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn rejects_per_page_above_documented_max_for_list() {
+        let cli = Cli::try_parse_from(["puddle", "list", "--per-page", "51"]);
+
+        assert!(cli.is_err());
+    }
+
     #[tokio::test]
     async fn fetch_all_raindrops_collects_paginated_results() {
         let server = MockServer::start().await;
 
-        let first_page_items = (1..=25)
+        let first_page_items = (1..=50)
             .map(|id| {
                 serde_json::json!({
                     "_id": id,
@@ -823,15 +831,15 @@ mod tests {
             .collect::<Vec<_>>();
         let second_page_items = vec![
             serde_json::json!({
-                "_id": 26,
-                "title": "Item 26",
-                "link": "https://example.com/26",
+                "_id": 51,
+                "title": "Item 51",
+                "link": "https://example.com/51",
                 "tags": ["export"]
             }),
             serde_json::json!({
-                "_id": 27,
-                "title": "Item 27",
-                "link": "https://example.com/27",
+                "_id": 52,
+                "title": "Item 52",
+                "link": "https://example.com/52",
                 "tags": []
             }),
         ];
@@ -839,11 +847,11 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/raindrops/0"))
             .and(query_param("page", "0"))
-            .and(query_param("perpage", "25"))
+            .and(query_param("perpage", "50"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "result": true,
                 "items": first_page_items,
-                "count": 25
+                "count": 50
             })))
             .mount(&server)
             .await;
@@ -851,7 +859,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/raindrops/0"))
             .and(query_param("page", "1"))
-            .and(query_param("perpage", "25"))
+            .and(query_param("perpage", "50"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "result": true,
                 "items": second_page_items,
@@ -870,9 +878,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(27, items.len());
-        assert_eq!(1, items[0].id);
-        assert_eq!(27, items[26].id);
+        assert_eq!(52, items.len());
+        assert_eq!(RaindropId::new(1), items[0].id);
+        assert_eq!(RaindropId::new(52), items[51].id);
     }
 
     #[tokio::test]
@@ -882,7 +890,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/raindrops/-1"))
             .and(query_param("page", "0"))
-            .and(query_param("perpage", "25"))
+            .and(query_param("perpage", "50"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "result": true,
                 "items": [],

@@ -5,8 +5,8 @@ use crate::models::common::{
     BoolResponse, CollectionScope, ItemResponse, ItemsResponse, ModifiedResponse,
 };
 use crate::models::raindrops::{
-    CreateRaindrop, DeleteManyParams, DeleteManyRaindrops, Raindrop, RaindropListParams,
-    UpdateManyParams, UpdateManyRaindrops, UpdateRaindrop,
+    CreateRaindrop, DeleteManyRaindrops, Raindrop, RaindropId, RaindropListParams,
+    UpdateManyRaindrops, UpdateRaindrop,
 };
 use mime::Mime;
 use reqwest::Method;
@@ -21,7 +21,7 @@ impl RaindropsApi {
         Self { client }
     }
 
-    pub async fn get(&self, id: i64) -> Result<Response<Raindrop>, Error> {
+    pub async fn get(&self, id: RaindropId) -> Result<Response<Raindrop>, Error> {
         let path = format!("raindrop/{id}");
         let res = self
             .client
@@ -53,7 +53,7 @@ impl RaindropsApi {
 
     pub async fn update(
         &self,
-        id: i64,
+        id: RaindropId,
         payload: &UpdateRaindrop,
     ) -> Result<Response<Raindrop>, Error> {
         let path = format!("raindrop/{id}");
@@ -68,7 +68,7 @@ impl RaindropsApi {
         })
     }
 
-    pub async fn delete(&self, id: i64) -> Result<Response<bool>, Error> {
+    pub async fn delete(&self, id: RaindropId) -> Result<Response<bool>, Error> {
         let path = format!("raindrop/{id}");
         let res = self
             .client
@@ -106,7 +106,7 @@ impl RaindropsApi {
 
     pub async fn upload_cover(
         &self,
-        id: i64,
+        id: RaindropId,
         bytes: Vec<u8>,
         mime: Mime,
         file_name: &str,
@@ -175,28 +175,11 @@ impl RaindropsApi {
         &self,
         collection_id: CollectionScope,
         payload: &UpdateManyRaindrops,
-        params: Option<&UpdateManyParams>,
     ) -> Result<Response<u64>, Error> {
         let path = format!("raindrops/{}", i64::from(collection_id));
-        #[derive(serde::Serialize)]
-        struct Body<'a> {
-            ids: Vec<i64>,
-            #[serde(flatten)]
-            payload: &'a UpdateManyRaindrops,
-        }
-
-        let ids = params
-            .and_then(|params| params.ids.as_deref())
-            .map(|ids| {
-                ids.split(',')
-                    .filter_map(|id| id.trim().parse::<i64>().ok())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let body = Body { ids, payload };
         let res = self
             .client
-            .send_json::<ModifiedResponse, (), _>(Method::PUT, &path, None, Some(&body))
+            .send_json::<ModifiedResponse, (), _>(Method::PUT, &path, None, Some(payload))
             .await?;
 
         Ok(Response {
@@ -209,16 +192,15 @@ impl RaindropsApi {
         &self,
         collection_id: CollectionScope,
         payload: &DeleteManyRaindrops,
-        params: Option<&DeleteManyParams>,
-    ) -> Result<Response<bool>, Error> {
+    ) -> Result<Response<u64>, Error> {
         let path = format!("raindrops/{}", i64::from(collection_id));
         let res = self
             .client
-            .send_json::<BoolResponse, _, _>(Method::DELETE, &path, params, Some(payload))
+            .send_json::<ModifiedResponse, (), _>(Method::DELETE, &path, None, Some(payload))
             .await?;
 
         Ok(Response {
-            data: res.data.result,
+            data: res.data.modified,
             meta: res.meta,
         })
     }

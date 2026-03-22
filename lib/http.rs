@@ -127,7 +127,13 @@ impl RaindropClient {
             ))
         })?;
 
-        let data = serde_json::from_value(raw).map_err(|e| Error::Deserialize(e.to_string()))?;
+        let data = serde_json::from_value(raw.clone()).map_err(|e| {
+            if let Some(api_error) = success_status_api_error(status, &raw) {
+                api_error
+            } else {
+                Error::Deserialize(e.to_string())
+            }
+        })?;
 
         Ok(Response {
             data,
@@ -151,6 +157,24 @@ fn map_api_error(status: StatusCode, raw: serde_json::Value) -> Error {
         message,
         raw: Some(raw),
     }
+}
+
+fn success_status_api_error(status: StatusCode, raw: &serde_json::Value) -> Option<Error> {
+    let parsed = serde_json::from_value::<ApiErrorPayload>(raw.clone()).ok()?;
+
+    if parsed.result != Some(false) {
+        return None;
+    }
+
+    let has_error_details = parsed.error.is_some()
+        || parsed.error_message.is_some()
+        || parsed.message.is_some();
+
+    if !has_error_details {
+        return None;
+    }
+
+    Some(map_api_error(status, raw.clone()))
 }
 
 fn parse_rate_limit(headers: &reqwest::header::HeaderMap) -> RateLimitInfo {
