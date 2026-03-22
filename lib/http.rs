@@ -166,9 +166,8 @@ fn success_status_api_error(status: StatusCode, raw: &serde_json::Value) -> Opti
         return None;
     }
 
-    let has_error_details = parsed.error.is_some()
-        || parsed.error_message.is_some()
-        || parsed.message.is_some();
+    let has_error_details =
+        parsed.error.is_some() || parsed.error_message.is_some() || parsed.message.is_some();
 
     if !has_error_details {
         return None;

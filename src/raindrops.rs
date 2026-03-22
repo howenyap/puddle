@@ -4,8 +4,8 @@ use clap::Args;
 use puddle::RaindropClient;
 use puddle::models::common::{CollectionScope, ItemsResponse};
 use puddle::models::raindrops::{
-    CollectionRef, CreateRaindrop, DeleteManyRaindrops, Raindrop, RaindropId,
-    RaindropListParams, UpdateManyRaindrops, UpdateRaindrop,
+    CollectionRef, CreateRaindrop, DeleteManyRaindrops, Raindrop, RaindropId, RaindropListParams,
+    UpdateManyRaindrops, UpdateRaindrop,
 };
 use puddle::pagination::{MAX_PER_PAGE, PageParams, PerPage};
 use std::collections::HashMap;
@@ -437,10 +437,7 @@ async fn fetch_all_raindrops(
         let params = RaindropListParams::new()
             .page(page)
             .per_page(PerPage::new_unchecked(MAX_PER_PAGE));
-        let response = client
-            .raindrops()
-            .list(collection_id, &params)
-            .await?;
+        let response = client.raindrops().list(collection_id, &params).await?;
         let mut items = response.data.items;
         let item_count = items.len();
 

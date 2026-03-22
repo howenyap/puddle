@@ -193,7 +193,12 @@ async fn raindrops_get_parses_item_envelope_with_underscore_id() {
         .build()
         .unwrap();
 
-    let item = client.raindrops().get(RaindropId::new(314)).await.unwrap().data;
+    let item = client
+        .raindrops()
+        .get(RaindropId::new(314))
+        .await
+        .unwrap()
+        .data;
     assert_eq!(RaindropId::new(314), item.id);
     assert_eq!(Some("Detailed entry"), item.title.as_deref());
     assert_eq!(Some("https://example.com/detail"), item.link.as_deref());
