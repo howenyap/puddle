@@ -273,7 +273,7 @@ async fn tags_rename_preserves_false_bool_response_on_success_status() {
         .unwrap()
         .data;
 
-    assert_eq!(false, result);
+    assert!(!result);
 }
 
 #[tokio::test]

@@ -12,3 +12,11 @@
 - Use `https://oauthdebugger.com/debug` for the redirect URI
 - Copy your `Client ID` and `Client secret` into the CLI inputs
 - Try running `puddle me`, you should see your account details and you're all set!
+
+# Development
+Make sure you have [Rust](https://rust-lang.org/tools/install/) installed
+
+## Pre-commit Hooks
+- Install [prek](https://github.com/j178/prek)
+- Install the local Git hooks `prek install`
+- Manual run with `prek run`
