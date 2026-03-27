@@ -26,6 +26,16 @@ Puddle is a CLI tool to interact with the [Raindrop.io API](https://developer.ra
 - Copy your `Client ID` and `Client secret` into the CLI inputs
 - Try running `puddle me`, you should see your account details and you're all set!
 
+## Environment Variables
+`puddle` can also load configuration from environment variables instead of `config.toml`.
+
+Supported variables:
+- `PUDDLE_CLIENT_ID`
+- `PUDDLE_CLIENT_SECRET`
+- `PUDDLE_REDIRECT_URI`
+- `PUDDLE_ACCESS_TOKEN`
+- `PUDDLE_REFRESH_TOKEN`
+
 # Development
 Make sure you have [Rust](https://rust-lang.org/tools/install/) installed.
 

@@ -1,4 +1,5 @@
 use crate::constants::{
+    ENV_ACCESS_TOKEN, ENV_CLIENT_ID, ENV_CLIENT_SECRET, ENV_REDIRECT_URI, ENV_REFRESH_TOKEN,
     TOML_ACCESS_TOKEN, TOML_CLIENT_ID, TOML_CLIENT_SECRET, TOML_REDIRECT_URI, TOML_REFRESH_TOKEN,
 };
 use std::env;
@@ -7,6 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use toml::Value;
 
+#[derive(Debug)]
 pub struct Config {
     pub client_id: String,
     pub client_secret: String,
@@ -16,6 +18,15 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn load() -> io::Result<Self> {
+        if let Some(config) = Self::from_env()? {
+            return Ok(config);
+        }
+
+        let config_path = global_config_path()?;
+        Self::from_path(&config_path)
+    }
+
     pub fn from_path(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref();
         let content = fs::read_to_string(path).map_err(|err| {
@@ -71,6 +82,57 @@ impl Config {
         fs::write(path, format!("{content}\n"))?;
 
         Ok(())
+    }
+
+    fn from_env() -> io::Result<Option<Self>> {
+        let entries = [
+            ENV_CLIENT_ID,
+            ENV_CLIENT_SECRET,
+            ENV_REDIRECT_URI,
+            ENV_ACCESS_TOKEN,
+            ENV_REFRESH_TOKEN,
+        ]
+        .map(|key| {
+            (
+                key,
+                env::var(key).ok().filter(|value| !value.trim().is_empty()),
+            )
+        });
+
+        if entries.iter().all(|(_, value)| value.is_none()) {
+            return Ok(None);
+        }
+
+        let [
+            (_, Some(client_id)),
+            (_, Some(client_secret)),
+            (_, Some(redirect_uri)),
+            (_, Some(access_token)),
+            (_, Some(refresh_token)),
+        ] = entries
+        else {
+            let missing = entries
+                .iter()
+                .filter(|(_, value)| value.is_none())
+                .map(|(env_key, _)| *env_key)
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "partial PUDDLE_* environment configuration detected. Missing or empty: {missing}"
+                ),
+            ));
+        };
+
+        Ok(Some(Self {
+            client_id,
+            client_secret,
+            redirect_uri,
+            access_token,
+            refresh_token,
+        }))
     }
 
     fn required_toml_string(table: &toml::Table, key: &str, path: &Path) -> io::Result<String> {
