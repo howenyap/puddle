@@ -50,6 +50,12 @@ pub enum Error {
     Url(String),
 }
 
+impl Error {
+    pub fn is_refreshable_auth_error(&self) -> bool {
+        matches!(self, Error::Api { status, .. } if status.as_u16() == 401)
+    }
+}
+
 impl From<url::ParseError> for Error {
     fn from(value: url::ParseError) -> Self {
         Self::Url(value.to_string())

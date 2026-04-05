@@ -2,14 +2,15 @@ use crate::constants::{
     ENV_ACCESS_TOKEN, ENV_CLIENT_ID, ENV_CLIENT_SECRET, ENV_REDIRECT_URI, ENV_REFRESH_TOKEN,
     TOML_ACCESS_TOKEN, TOML_CLIENT_ID, TOML_CLIENT_SECRET, TOML_REDIRECT_URI, TOML_REFRESH_TOKEN,
 };
+use puddle::auth::oauth;
 use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use toml::Value;
 
-#[derive(Debug)]
-pub struct Config {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfigValues {
     pub client_id: String,
     pub client_secret: String,
     pub redirect_uri: String,
@@ -17,17 +18,100 @@ pub struct Config {
     pub refresh_token: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Config {
+    Env(ConfigValues),
+    File { path: PathBuf, values: ConfigValues },
+}
+
 impl Config {
-    pub fn load() -> io::Result<Self> {
-        if let Some(config) = Self::from_env()? {
-            return Ok(config);
+    pub(crate) fn load() -> io::Result<Self> {
+        if let Some(values) = ConfigValues::from_env()? {
+            return Ok(Self::Env(values));
         }
 
-        let config_path = global_config_path()?;
-        Self::from_path(&config_path)
+        let path = global_config_path()?;
+        let values = ConfigValues::from_path(&path)?;
+
+        Ok(Self::File { path, values })
     }
 
-    pub fn from_path(path: impl AsRef<Path>) -> io::Result<Self> {
+    pub(crate) fn values(&self) -> &ConfigValues {
+        match self {
+            Self::Env(values) => values,
+            Self::File { values, .. } => values,
+        }
+    }
+
+    pub(crate) fn with_refreshed_tokens(
+        &self,
+        access_token: String,
+        refresh_token: Option<String>,
+    ) -> Self {
+        match self {
+            Self::Env(values) => {
+                Self::Env(values.with_refreshed_tokens(access_token, refresh_token))
+            }
+            Self::File { path, values } => Self::File {
+                path: path.clone(),
+                values: values.with_refreshed_tokens(access_token, refresh_token),
+            },
+        }
+    }
+
+    pub(crate) fn persist(&self) -> io::Result<()> {
+        if let Self::File { path, values } = self {
+            let mut table = toml::Table::new();
+
+            table.insert(
+                TOML_CLIENT_ID.to_string(),
+                Value::String(values.client_id.clone()),
+            );
+            table.insert(
+                TOML_CLIENT_SECRET.to_string(),
+                Value::String(values.client_secret.clone()),
+            );
+            table.insert(
+                TOML_REDIRECT_URI.to_string(),
+                Value::String(values.redirect_uri.clone()),
+            );
+            table.insert(
+                TOML_ACCESS_TOKEN.to_string(),
+                Value::String(values.access_token.clone()),
+            );
+            table.insert(
+                TOML_REFRESH_TOKEN.to_string(),
+                Value::String(values.refresh_token.clone()),
+            );
+
+            let content = toml::to_string_pretty(&table).map_err(|e| {
+                io::Error::other(format!("failed to serialize global config toml: {e}"))
+            })?;
+            fs::write(path, format!("{content}\n"))?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn refresh_access_token(self) -> Result<Self, Box<dyn std::error::Error>> {
+        let values = self.values();
+        let token = oauth::TokenRequestBuilder::refresh(
+            &values.client_id,
+            &values.client_secret,
+            &values.refresh_token,
+        )
+        .send()
+        .await?;
+
+        let config = self.with_refreshed_tokens(token.access_token, token.refresh_token);
+        config.persist()?;
+
+        Ok(config)
+    }
+}
+
+impl ConfigValues {
+    pub(crate) fn from_path(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref();
         let content = fs::read_to_string(path).map_err(|err| {
             io::Error::new(
@@ -51,10 +135,10 @@ impl Config {
         })
     }
 
-    pub fn write_to_global_path(&self) -> io::Result<()> {
+    pub(crate) fn write_to_global_path(&self) -> io::Result<()> {
         let path = global_config_path()?;
-
         let mut table = toml::Table::new();
+
         table.insert(
             TOML_CLIENT_ID.to_string(),
             Value::String(self.client_id.clone()),
@@ -82,6 +166,20 @@ impl Config {
         fs::write(path, format!("{content}\n"))?;
 
         Ok(())
+    }
+
+    pub(crate) fn with_refreshed_tokens(
+        &self,
+        access_token: String,
+        refresh_token: Option<String>,
+    ) -> Self {
+        Self {
+            client_id: self.client_id.clone(),
+            client_secret: self.client_secret.clone(),
+            redirect_uri: self.redirect_uri.clone(),
+            access_token,
+            refresh_token: refresh_token.unwrap_or_else(|| self.refresh_token.clone()),
+        }
     }
 
     fn from_env() -> io::Result<Option<Self>> {

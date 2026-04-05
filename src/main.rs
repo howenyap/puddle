@@ -9,7 +9,7 @@ mod tags;
 mod user;
 
 use crate::app::CliApp;
-use crate::config::{Config, global_config_path};
+use crate::config::{ConfigValues, global_config_path};
 use crate::constants::{
     AUTHORIZE_URL_BASE, DEFAULT_OAUTH_DEBUG_REDIRECT_URI, RAINDROP_INTEGRATIONS_URI,
 };
@@ -94,26 +94,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", path.display());
         }
         command => {
-            let app = CliApp::new()?;
-
-            match command {
-                Command::List(args) => app.list(args).await?,
-                Command::Get(args) => app.get(args).await?,
-                Command::Create(args) => app.create(args).await?,
-                Command::Update(args) => app.update(args).await?,
-                Command::Delete(args) => app.delete(args).await?,
-                Command::UploadFile(args) => app.upload_file(args).await?,
-                Command::UploadCover(args) => app.upload_cover(args).await?,
-                Command::CreateMany(args) => app.create_many(args).await?,
-                Command::UpdateMany(args) => app.update_many(args).await?,
-                Command::DeleteMany(args) => app.delete_many(args).await?,
-                Command::Export(args) => app.export(args).await?,
-                Command::Collections { command } => app.run_collections(command).await?,
-                Command::Tags { command } => app.run_tags(command).await?,
-                Command::Me => app.user_me().await?,
-                Command::Filters { command } => app.run_filters(command).await?,
-                Command::Setup | Command::Config => unreachable!(),
-            }
+            let mut app = CliApp::new()?;
+            app.run_command(command).await?;
         }
     }
 
@@ -149,7 +131,7 @@ async fn run_setup() -> Result<(), Box<dyn std::error::Error>> {
         .refresh_token
         .ok_or_else(|| io::Error::other("missing refresh token in OAuth response"))?;
 
-    let config = Config {
+    let config = ConfigValues {
         client_id,
         client_secret,
         redirect_uri,
