@@ -69,6 +69,14 @@ impl CollectionScope {
             _ => Ok(Self::Id(id)),
         }
     }
+
+    pub fn into_destination_id(self) -> Result<i64, InvalidDestinationCollectionScope> {
+        match self {
+            Self::Id(id) => Ok(id),
+            Self::Unsorted => Ok(i64::from(Self::Unsorted)),
+            Self::All | Self::Trash => Err(InvalidDestinationCollectionScope(self)),
+        }
+    }
 }
 
 impl From<i64> for CollectionScope {
@@ -145,6 +153,25 @@ impl Display for ParseCollectionScopeError {
 
 impl StdError for ParseCollectionScopeError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidDestinationCollectionScope(pub CollectionScope);
+
+impl Display for InvalidDestinationCollectionScope {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            CollectionScope::All => {
+                f.write_str("`All` is not a valid destination collection; use a specific collection or `Unsorted`")
+            }
+            CollectionScope::Trash => {
+                f.write_str("`Trash` is not a valid destination collection")
+            }
+            CollectionScope::Id(_) | CollectionScope::Unsorted => unreachable!(),
+        }
+    }
+}
+
+impl StdError for InvalidDestinationCollectionScope {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,5 +218,23 @@ mod tests {
     #[test]
     fn collection_scope_defaults_to_all() {
         assert_eq!(CollectionScope::All, CollectionScope::default());
+    }
+
+    #[test]
+    fn destination_id_accepts_writable_scopes() {
+        assert_eq!(Ok(42), CollectionScope::Id(42).into_destination_id());
+        assert_eq!(Ok(-1), CollectionScope::Unsorted.into_destination_id());
+    }
+
+    #[test]
+    fn destination_id_rejects_non_writable_scopes() {
+        assert_eq!(
+            Err(InvalidDestinationCollectionScope(CollectionScope::All)),
+            CollectionScope::All.into_destination_id()
+        );
+        assert_eq!(
+            Err(InvalidDestinationCollectionScope(CollectionScope::Trash)),
+            CollectionScope::Trash.into_destination_id()
+        );
     }
 }

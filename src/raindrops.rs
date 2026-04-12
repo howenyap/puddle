@@ -4,11 +4,12 @@ use clap::{ArgGroup, Args};
 use puddle::RaindropClient;
 use puddle::models::common::{CollectionScope, ItemsResponse};
 use puddle::models::raindrops::{
-    CollectionRef, CreateRaindrop, DeleteManyRaindrops, Raindrop, RaindropId, RaindropListParams,
+    CreateRaindrop, DeleteManyRaindrops, Raindrop, RaindropId, RaindropListParams,
     UpdateManyRaindrops, UpdateRaindrop,
 };
 use puddle::pagination::{MAX_PER_PAGE, PageParams, PerPage};
 use std::collections::{BTreeMap, HashMap};
+use std::convert::TryInto;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -72,8 +73,8 @@ pub(crate) struct CreateArgs {
     pub(crate) excerpt: Option<String>,
     #[arg(long = "tag")]
     pub(crate) tags: Vec<String>,
-    #[arg(long)]
-    pub(crate) collection: Option<i64>,
+    #[arg(long, allow_hyphen_values = true)]
+    pub(crate) collection: Option<CollectionScope>,
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
@@ -85,8 +86,8 @@ pub(crate) struct UpdateArgs {
     pub(crate) excerpt: Option<String>,
     #[arg(long = "tag")]
     pub(crate) tags: Vec<String>,
-    #[arg(long)]
-    pub(crate) collection: Option<i64>,
+    #[arg(long, allow_hyphen_values = true)]
+    pub(crate) collection: Option<CollectionScope>,
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
@@ -133,7 +134,7 @@ pub(crate) struct UpdateManyArgs {
     #[arg(long = "tag")]
     pub(crate) tags: Vec<String>,
     #[arg(long = "to-collection", allow_hyphen_values = true)]
-    pub(crate) to_collection: Option<i64>,
+    pub(crate) to_collection: Option<CollectionScope>,
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
@@ -184,7 +185,7 @@ impl CliApp {
     }
 
     pub(crate) async fn create(&self, args: CreateArgs) -> Result<(), Box<dyn std::error::Error>> {
-        let payload = create_payload(args);
+        let payload = create_payload(args)?;
         let response = self.client.raindrops().create(&payload).await?;
         println!("{}", RaindropDetailDisplay(&response.data));
 
@@ -195,7 +196,7 @@ impl CliApp {
         let payload = UpdateRaindrop {
             title: args.title,
             excerpt: args.excerpt,
-            collection: args.collection.map(CollectionRef::new),
+            collection: args.collection.map(TryInto::try_into).transpose()?,
             tags: (!args.tags.is_empty()).then_some(args.tags),
             extra: HashMap::new(),
         };
@@ -331,15 +332,17 @@ impl CliApp {
     }
 }
 
-fn create_payload(args: CreateArgs) -> CreateRaindrop {
-    CreateRaindrop {
+fn create_payload(
+    args: CreateArgs,
+) -> Result<CreateRaindrop, puddle::models::common::InvalidDestinationCollectionScope> {
+    Ok(CreateRaindrop {
         link: args.link,
         title: args.title,
         excerpt: args.excerpt,
-        collection: args.collection.map(CollectionRef::new),
+        collection: args.collection.map(TryInto::try_into).transpose()?,
         tags: args.tags,
         extra: HashMap::new(),
-    }
+    })
 }
 
 fn print_raindrop_list(items: &ItemsResponse<Raindrop>, current_page: u32) {
@@ -505,7 +508,7 @@ async fn execute_update_many(
 
     let payload = UpdateManyRaindrops {
         ids: Some(selection.ids.clone()),
-        collection: args.to_collection.map(CollectionRef::new),
+        collection: args.to_collection.map(TryInto::try_into).transpose()?,
         tags: (!args.tags.is_empty()).then_some(args.tags.clone()),
         extra: HashMap::new(),
     };
@@ -576,6 +579,7 @@ mod tests {
     use super::*;
     use crate::{Cli, Command};
     use clap::Parser;
+    use puddle::models::raindrops::CollectionRef;
     use std::collections::HashMap;
     use wiremock::matchers::{body_json, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -635,7 +639,47 @@ mod tests {
                 title: Some("Example".to_string()),
                 excerpt: Some("Notes".to_string()),
                 tags: vec!["rust".to_string(), "cli".to_string()],
-                collection: Some(42),
+                collection: Some(CollectionScope::id(42).unwrap()),
+            })),
+            cli.command
+        );
+    }
+
+    #[test]
+    fn parses_named_system_collection_for_create() {
+        let cli = Cli::try_parse_from([
+            "puddle",
+            "create",
+            "https://example.com",
+            "--collection",
+            "Unsorted",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            Some(Command::Create(CreateArgs {
+                link: "https://example.com".to_string(),
+                title: None,
+                excerpt: None,
+                tags: vec![],
+                collection: Some(CollectionScope::Unsorted),
+            })),
+            cli.command
+        );
+    }
+
+    #[test]
+    fn parses_named_system_collection_for_update() {
+        let cli =
+            Cli::try_parse_from(["puddle", "update", "42", "--collection", "Unsorted"]).unwrap();
+
+        assert_eq!(
+            Some(Command::Update(UpdateArgs {
+                id: RaindropId::new(42),
+                title: None,
+                excerpt: None,
+                tags: vec![],
+                collection: Some(CollectionScope::Unsorted),
             })),
             cli.command
         );
@@ -729,7 +773,32 @@ mod tests {
                 exclude_collection: vec![CollectionScope::Trash],
                 search: Some("rust".to_string()),
                 tags: vec!["rust".to_string()],
-                to_collection: Some(7),
+                to_collection: Some(CollectionScope::id(7).unwrap()),
+            })),
+            cli.command
+        );
+    }
+
+    #[test]
+    fn parses_named_system_collection_for_update_many_destination() {
+        let cli = Cli::try_parse_from([
+            "puddle",
+            "update-many",
+            "--id",
+            "10",
+            "--to-collection",
+            "Unsorted",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            Some(Command::UpdateMany(UpdateManyArgs {
+                ids: vec![10],
+                from_collection: vec![],
+                exclude_collection: vec![],
+                search: None,
+                tags: vec![],
+                to_collection: Some(CollectionScope::Unsorted),
             })),
             cli.command
         );
@@ -814,16 +883,51 @@ mod tests {
             title: Some("Example".to_string()),
             excerpt: Some("Summary".to_string()),
             tags: vec!["rust".to_string(), "cli".to_string()],
-            collection: Some(7),
+            collection: Some(CollectionScope::id(7).unwrap()),
         };
 
-        let payload = create_payload(args);
+        let payload = create_payload(args).unwrap();
 
         assert_eq!("https://example.com", payload.link);
         assert_eq!(Some("Example"), payload.title.as_deref());
         assert_eq!(Some("Summary"), payload.excerpt.as_deref());
         assert_eq!(Some(7), payload.collection.as_ref().map(|value| value.id));
         assert_eq!(vec!["rust", "cli"], payload.tags);
+    }
+
+    #[test]
+    fn create_payload_accepts_unsorted_destination() {
+        let args = CreateArgs {
+            link: "https://example.com".to_string(),
+            title: None,
+            excerpt: None,
+            tags: vec![],
+            collection: Some(CollectionScope::Unsorted),
+        };
+
+        let payload = create_payload(args).unwrap();
+
+        assert_eq!(Some(-1), payload.collection.as_ref().map(|value| value.id));
+    }
+
+    #[test]
+    fn destination_collection_rejects_all() {
+        let error = CollectionScope::All.into_destination_id().unwrap_err();
+
+        assert_eq!(
+            "`All` is not a valid destination collection; use a specific collection or `Unsorted`",
+            error.to_string()
+        );
+    }
+
+    #[test]
+    fn destination_collection_rejects_trash() {
+        let error = CollectionScope::Trash.into_destination_id().unwrap_err();
+
+        assert_eq!(
+            "`Trash` is not a valid destination collection",
+            error.to_string()
+        );
     }
 
     #[test]
@@ -1062,7 +1166,7 @@ mod tests {
                 exclude_collection: vec![],
                 search: None,
                 tags: vec!["rust".to_string()],
-                to_collection: Some(7),
+                to_collection: Some(CollectionScope::id(7).unwrap()),
             },
         )
         .await

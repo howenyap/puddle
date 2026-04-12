@@ -1,4 +1,4 @@
-use crate::models::common::CollectionScope;
+use crate::models::common::{CollectionScope, InvalidDestinationCollectionScope};
 use crate::pagination::{PageParams, PerPage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -89,6 +89,14 @@ impl CollectionRef {
             id,
             extra: HashMap::new(),
         }
+    }
+}
+
+impl TryFrom<CollectionScope> for CollectionRef {
+    type Error = InvalidDestinationCollectionScope;
+
+    fn try_from(scope: CollectionScope) -> Result<Self, Self::Error> {
+        Ok(Self::new(scope.into_destination_id()?))
     }
 }
 
