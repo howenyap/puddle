@@ -1,3 +1,4 @@
+use crate::models::common::CollectionScope;
 use crate::pagination::{PageParams, PerPage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -16,6 +17,19 @@ pub struct Raindrop {
     pub tags: Vec<String>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
+}
+
+impl Raindrop {
+    pub fn matches_scope(&self, scope: CollectionScope) -> bool {
+        match scope {
+            CollectionScope::All => true,
+            CollectionScope::Id(id) => self.collection.as_ref().is_some_and(|value| value.id == id),
+            CollectionScope::Unsorted | CollectionScope::Trash => self
+                .collection
+                .as_ref()
+                .is_some_and(|value| value.id == i64::from(scope)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -67,6 +81,15 @@ pub struct CollectionRef {
     pub id: i64,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
+}
+
+impl CollectionRef {
+    pub fn new(id: i64) -> Self {
+        Self {
+            id,
+            extra: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

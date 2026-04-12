@@ -1,6 +1,6 @@
 use crate::app::CliApp;
 use crate::common::{display_text, read_upload_file};
-use clap::Args;
+use clap::{ArgGroup, Args};
 use puddle::RaindropClient;
 use puddle::models::common::{CollectionScope, ItemsResponse};
 use puddle::models::raindrops::{
@@ -8,7 +8,7 @@ use puddle::models::raindrops::{
     UpdateManyRaindrops, UpdateRaindrop,
 };
 use puddle::pagination::{MAX_PER_PAGE, PageParams, PerPage};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -115,15 +115,25 @@ pub(crate) struct CreateManyArgs {
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
+#[command(group(
+    ArgGroup::new("selector")
+        .args(["ids", "from_collection"])
+        .required(true)
+        .multiple(true)
+))]
 pub(crate) struct UpdateManyArgs {
-    #[arg(long, allow_hyphen_values = true, default_value_t = CollectionScope::default())]
-    pub(crate) collection_id: CollectionScope,
-    #[arg(long = "id", required = true)]
+    #[arg(long = "id")]
     pub(crate) ids: Vec<i64>,
+    #[arg(long = "from-collection", allow_hyphen_values = true)]
+    pub(crate) from_collection: Vec<CollectionScope>,
+    #[arg(long = "exclude-collection", allow_hyphen_values = true)]
+    pub(crate) exclude_collection: Vec<CollectionScope>,
+    #[arg(long)]
+    pub(crate) search: Option<String>,
     #[arg(long = "tag")]
     pub(crate) tags: Vec<String>,
-    #[arg(long)]
-    pub(crate) collection: Option<i64>,
+    #[arg(long = "to-collection", allow_hyphen_values = true)]
+    pub(crate) to_collection: Option<i64>,
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
@@ -185,7 +195,7 @@ impl CliApp {
         let payload = UpdateRaindrop {
             title: args.title,
             excerpt: args.excerpt,
-            collection: args.collection.map(collection_ref),
+            collection: args.collection.map(CollectionRef::new),
             tags: (!args.tags.is_empty()).then_some(args.tags),
             extra: HashMap::new(),
         };
@@ -256,26 +266,35 @@ impl CliApp {
         &self,
         args: UpdateManyArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let payload = UpdateManyRaindrops {
-            ids: Some(args.ids.clone()),
-            collection: args.collection.map(collection_ref),
-            tags: (!args.tags.is_empty()).then_some(args.tags),
-            extra: HashMap::new(),
-        };
-        let response = self
-            .client
-            .raindrops()
-            .update_many(args.collection_id, &payload)
-            .await?;
-        println!("modified: {}", response.data);
-        println!(
-            "ids: {}",
-            args.ids
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+        let outcome = execute_update_many(&self.client, &args).await?;
+
+        if outcome.modified == 0 {
+            println!("No raindrops matched the requested selectors.");
+            return Ok(());
+        }
+
+        let selection = outcome.selection;
+
+        println!("matched: {}", selection.ids.len());
+        println!("modified: {}", outcome.modified);
+
+        if !selection.from_collections.is_empty() {
+            println!(
+                "from collections: {}",
+                format_collection_scopes(&selection.from_collections)
+            );
+        }
+
+        if !selection.excluded_collections.is_empty() {
+            println!(
+                "excluded collections: {}",
+                format_collection_scopes(&selection.excluded_collections)
+            );
+        }
+
+        if let Some(search) = selection.search {
+            println!("search: {search}");
+        }
 
         Ok(())
     }
@@ -317,15 +336,8 @@ fn create_payload(args: CreateArgs) -> CreateRaindrop {
         link: args.link,
         title: args.title,
         excerpt: args.excerpt,
-        collection: args.collection.map(collection_ref),
+        collection: args.collection.map(CollectionRef::new),
         tags: args.tags,
-        extra: HashMap::new(),
-    }
-}
-
-fn collection_ref(id: i64) -> CollectionRef {
-    CollectionRef {
-        id,
         extra: HashMap::new(),
     }
 }
@@ -428,16 +440,27 @@ fn format_raindrop_summary(item: &Raindrop) -> String {
 
 async fn fetch_all_raindrops(
     client: &RaindropClient,
-    collection_id: CollectionScope,
+    collection_scope: CollectionScope,
+) -> Result<Vec<Raindrop>, Box<dyn std::error::Error>> {
+    fetch_all_raindrops_matching(client, collection_scope, None).await
+}
+
+async fn fetch_all_raindrops_matching(
+    client: &RaindropClient,
+    collection_scope: CollectionScope,
+    search: Option<&str>,
 ) -> Result<Vec<Raindrop>, Box<dyn std::error::Error>> {
     let mut page = 0;
     let mut all_items = Vec::new();
 
     loop {
-        let params = RaindropListParams::new()
+        let mut params = RaindropListParams::new()
             .page(page)
             .per_page(PerPage::new_unchecked(MAX_PER_PAGE));
-        let response = client.raindrops().list(collection_id, &params).await?;
+        if let Some(search) = search {
+            params = params.search(search);
+        }
+        let response = client.raindrops().list(collection_scope, &params).await?;
         let mut items = response.data.items;
         let item_count = items.len();
 
@@ -451,6 +474,91 @@ async fn fetch_all_raindrops(
     }
 
     Ok(all_items)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedUpdateManySelection {
+    ids: Vec<i64>,
+    from_collections: Vec<CollectionScope>,
+    excluded_collections: Vec<CollectionScope>,
+    search: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UpdateManyOutcome {
+    selection: ResolvedUpdateManySelection,
+    modified: u64,
+}
+
+async fn execute_update_many(
+    client: &RaindropClient,
+    args: &UpdateManyArgs,
+) -> Result<UpdateManyOutcome, Box<dyn std::error::Error>> {
+    let selection = resolve_update_many_selection(client, args).await?;
+
+    if selection.ids.is_empty() {
+        return Ok(UpdateManyOutcome {
+            selection,
+            modified: 0,
+        });
+    }
+
+    let payload = UpdateManyRaindrops {
+        ids: Some(selection.ids.clone()),
+        collection: args.to_collection.map(CollectionRef::new),
+        tags: (!args.tags.is_empty()).then_some(args.tags.clone()),
+        extra: HashMap::new(),
+    };
+    let response = client
+        .raindrops()
+        .update_many(CollectionScope::All, &payload)
+        .await?;
+
+    Ok(UpdateManyOutcome {
+        selection,
+        modified: response.data,
+    })
+}
+
+async fn resolve_update_many_selection(
+    client: &RaindropClient,
+    args: &UpdateManyArgs,
+) -> Result<ResolvedUpdateManySelection, Box<dyn std::error::Error>> {
+    let mut selected = BTreeMap::new();
+
+    for id in &args.ids {
+        let response = client.raindrops().get(RaindropId::new(*id)).await?;
+        selected.insert(*id, response.data);
+    }
+
+    for scope in &args.from_collection {
+        let items = fetch_all_raindrops_matching(client, *scope, args.search.as_deref()).await?;
+        selected.extend(items.into_iter().map(|item| (item.id.into_inner(), item)));
+    }
+
+    if !args.exclude_collection.is_empty() {
+        selected.retain(|_, item| {
+            !args
+                .exclude_collection
+                .iter()
+                .any(|scope| item.matches_scope(*scope))
+        });
+    }
+
+    Ok(ResolvedUpdateManySelection {
+        ids: selected.into_keys().collect(),
+        from_collections: args.from_collection.clone(),
+        excluded_collections: args.exclude_collection.clone(),
+        search: args.search.clone(),
+    })
+}
+
+fn format_collection_scopes(scopes: &[CollectionScope]) -> String {
+    scopes
+        .iter()
+        .map(|scope| scope.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn write_raindrop_export(
@@ -469,7 +577,7 @@ mod tests {
     use crate::{Cli, Command};
     use clap::Parser;
     use std::collections::HashMap;
-    use wiremock::matchers::{method, path, query_param};
+    use wiremock::matchers::{body_json, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
@@ -595,28 +703,43 @@ mod tests {
         let cli = Cli::try_parse_from([
             "puddle",
             "update-many",
-            "--collection-id",
-            "5",
             "--id",
             "10",
             "--id",
             "12",
+            "--from-collection",
+            "5",
+            "--from-collection",
+            "Unsorted",
+            "--exclude-collection",
+            "Trash",
+            "--search",
+            "rust",
             "--tag",
             "rust",
-            "--collection",
+            "--to-collection",
             "7",
         ])
         .unwrap();
 
         assert_eq!(
             Some(Command::UpdateMany(UpdateManyArgs {
-                collection_id: CollectionScope::id(5).unwrap(),
                 ids: vec![10, 12],
+                from_collection: vec![CollectionScope::id(5).unwrap(), CollectionScope::Unsorted],
+                exclude_collection: vec![CollectionScope::Trash],
+                search: Some("rust".to_string()),
                 tags: vec!["rust".to_string()],
-                collection: Some(7),
+                to_collection: Some(7),
             })),
             cli.command
         );
+    }
+
+    #[test]
+    fn rejects_update_many_without_selector() {
+        let cli = Cli::try_parse_from(["puddle", "update-many", "--tag", "rust"]);
+
+        assert!(cli.is_err());
     }
 
     #[test]
@@ -907,5 +1030,260 @@ mod tests {
             .unwrap();
 
         assert_eq!(0, items.len());
+    }
+
+    #[tokio::test]
+    async fn execute_update_many_updates_union_of_discovered_and_explicit_ids() {
+        let server = MockServer::start().await;
+
+        mock_get_raindrop(&server, 10, 100, &[]).await;
+        mock_list_page(&server, 42, 0, None, &[raindrop_json(12, 42, &[])], false).await;
+        Mock::given(method("PUT"))
+            .and(path("/raindrops/0"))
+            .and(body_json(serde_json::json!({
+                "ids": [10, 12],
+                "tags": ["rust"],
+                "collection": { "$id": 7 }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": true,
+                "modified": 2
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server);
+        let outcome = execute_update_many(
+            &client,
+            &UpdateManyArgs {
+                ids: vec![10],
+                from_collection: vec![CollectionScope::id(42).unwrap()],
+                exclude_collection: vec![],
+                search: None,
+                tags: vec!["rust".to_string()],
+                to_collection: Some(7),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(2, outcome.modified);
+        assert_eq!(
+            ResolvedUpdateManySelection {
+                ids: vec![10, 12],
+                from_collections: vec![CollectionScope::id(42).unwrap()],
+                excluded_collections: vec![],
+                search: None,
+            },
+            outcome.selection
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_update_many_deduplicates_unioned_results() {
+        let server = MockServer::start().await;
+
+        mock_list_page(
+            &server,
+            42,
+            0,
+            None,
+            &[raindrop_json(10, 42, &[]), raindrop_json(12, 42, &[])],
+            false,
+        )
+        .await;
+        mock_list_page(
+            &server,
+            -1,
+            0,
+            None,
+            &[raindrop_json(10, -1, &[]), raindrop_json(15, -1, &[])],
+            false,
+        )
+        .await;
+        Mock::given(method("PUT"))
+            .and(path("/raindrops/0"))
+            .and(body_json(serde_json::json!({
+                "ids": [10, 12, 15]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": true,
+                "modified": 3
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server);
+        let outcome = execute_update_many(
+            &client,
+            &UpdateManyArgs {
+                ids: vec![],
+                from_collection: vec![CollectionScope::id(42).unwrap(), CollectionScope::Unsorted],
+                exclude_collection: vec![],
+                search: None,
+                tags: vec![],
+                to_collection: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(vec![10, 12, 15], outcome.selection.ids);
+        assert_eq!(3, outcome.modified);
+    }
+
+    #[tokio::test]
+    async fn execute_update_many_applies_excluded_collections_after_union() {
+        let server = MockServer::start().await;
+
+        mock_get_raindrop(&server, 10, -99, &[]).await;
+        mock_list_page(
+            &server,
+            42,
+            0,
+            None,
+            &[raindrop_json(12, 42, &[]), raindrop_json(13, -99, &[])],
+            false,
+        )
+        .await;
+        Mock::given(method("PUT"))
+            .and(path("/raindrops/0"))
+            .and(body_json(serde_json::json!({
+                "ids": [12]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": true,
+                "modified": 1
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server);
+        let outcome = execute_update_many(
+            &client,
+            &UpdateManyArgs {
+                ids: vec![10],
+                from_collection: vec![CollectionScope::id(42).unwrap()],
+                exclude_collection: vec![CollectionScope::Trash],
+                search: None,
+                tags: vec![],
+                to_collection: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(vec![12], outcome.selection.ids);
+        assert_eq!(1, outcome.modified);
+    }
+
+    #[tokio::test]
+    async fn execute_update_many_passes_search_to_list_requests_only() {
+        let server = MockServer::start().await;
+
+        mock_get_raindrop(&server, 10, 42, &[]).await;
+        mock_list_page(
+            &server,
+            42,
+            0,
+            Some("rust"),
+            &[raindrop_json(12, 42, &["rust"])],
+            false,
+        )
+        .await;
+        Mock::given(method("PUT"))
+            .and(path("/raindrops/0"))
+            .and(body_json(serde_json::json!({
+                "ids": [10, 12]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": true,
+                "modified": 2
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server);
+        let outcome = execute_update_many(
+            &client,
+            &UpdateManyArgs {
+                ids: vec![10],
+                from_collection: vec![CollectionScope::id(42).unwrap()],
+                exclude_collection: vec![],
+                search: Some("rust".to_string()),
+                tags: vec![],
+                to_collection: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(vec![10, 12], outcome.selection.ids);
+        assert_eq!(Some("rust".to_string()), outcome.selection.search);
+    }
+
+    fn test_client(server: &MockServer) -> RaindropClient {
+        RaindropClient::builder()
+            .access_token("test-token")
+            .base_url(server.uri())
+            .build()
+            .unwrap()
+    }
+
+    async fn mock_get_raindrop(server: &MockServer, id: i64, collection_id: i64, tags: &[&str]) {
+        Mock::given(method("GET"))
+            .and(path(format!("/raindrop/{id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": true,
+                "item": raindrop_json(id, collection_id, tags)
+            })))
+            .mount(server)
+            .await;
+    }
+
+    async fn mock_list_page(
+        server: &MockServer,
+        collection_scope: i64,
+        page: u32,
+        search: Option<&str>,
+        items: &[serde_json::Value],
+        has_next_page: bool,
+    ) {
+        let response_items = items.to_vec();
+        let mut mock = Mock::given(method("GET"))
+            .and(path(format!("/raindrops/{collection_scope}")))
+            .and(query_param("page", page.to_string()))
+            .and(query_param("perpage", "50"));
+        if let Some(search) = search {
+            mock = mock.and(query_param("search", search));
+        }
+        mock.respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": true,
+            "items": response_items,
+            "count": items.len(),
+        })))
+        .expect(1)
+        .mount(server)
+        .await;
+
+        if has_next_page {
+            unreachable!(
+                "test helper currently expects the caller to mount the next page explicitly"
+            );
+        }
+    }
+
+    fn raindrop_json(id: i64, collection_id: i64, tags: &[&str]) -> serde_json::Value {
+        serde_json::json!({
+            "_id": id,
+            "title": format!("Item {id}"),
+            "link": format!("https://example.com/{id}"),
+            "collection": { "$id": collection_id },
+            "tags": tags
+        })
     }
 }
