@@ -1,5 +1,10 @@
 use crate::app::CliApp;
 use crate::common::{display_text, read_upload_file};
+use crate::previews::{
+    CreateManyRaindropsPreview, CreateRaindropPreview, DeleteManyRaindropsPreview,
+    DeleteRaindropPreview, UpdateManyRaindropsPreview, UpdateRaindropPreview,
+    UploadRaindropCoverPreview, UploadRaindropFilePreview,
+};
 use clap::{ArgGroup, Args};
 use puddle::RaindropClient;
 use puddle::models::common::{CollectionScope, ItemsResponse};
@@ -185,7 +190,14 @@ impl CliApp {
     }
 
     pub(crate) async fn create(&self, args: CreateArgs) -> Result<(), Box<dyn std::error::Error>> {
-        let payload = create_payload(args)?;
+        let payload = create_payload(args.clone())?;
+
+        if self.is_dry_run() {
+            println!("{}", CreateRaindropPreview::new(&payload));
+
+            return Ok(());
+        }
+
         let response = self.client.raindrops().create(&payload).await?;
         println!("{}", RaindropDetailDisplay(&response.data));
 
@@ -200,6 +212,18 @@ impl CliApp {
             tags: (!args.tags.is_empty()).then_some(args.tags),
             extra: HashMap::new(),
         };
+
+        if self.is_dry_run() {
+            let existing_raindrop = self.client.raindrops().get(args.id).await?.data;
+
+            println!(
+                "{}",
+                UpdateRaindropPreview::new(&existing_raindrop, &payload)
+            );
+
+            return Ok(());
+        }
+
         let response = self.client.raindrops().update(args.id, &payload).await?;
         println!("{}", RaindropDetailDisplay(&response.data));
 
@@ -207,6 +231,14 @@ impl CliApp {
     }
 
     pub(crate) async fn delete(&self, args: DeleteArgs) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_dry_run() {
+            let existing_raindrop = self.client.raindrops().get(args.id).await?.data;
+
+            println!("{}", DeleteRaindropPreview::new(&existing_raindrop));
+
+            return Ok(());
+        }
+
         let response = self.client.raindrops().delete(args.id).await?;
         println!("deleted: {}", response.data);
 
@@ -217,6 +249,14 @@ impl CliApp {
         &self,
         args: UploadFileArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_dry_run() {
+            let _ = read_upload_file(&args.path)?;
+
+            println!("{}", UploadRaindropFilePreview::new(&args.path));
+
+            return Ok(());
+        }
+
         let (bytes, mime, file_name) = read_upload_file(&args.path)?;
         let response = self
             .client
@@ -232,6 +272,18 @@ impl CliApp {
         &self,
         args: UploadCoverArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_dry_run() {
+            let _ = read_upload_file(&args.path)?;
+            let existing_raindrop = self.client.raindrops().get(args.id).await?.data;
+
+            println!(
+                "{}",
+                UploadRaindropCoverPreview::new(&existing_raindrop, &args.path)
+            );
+
+            return Ok(());
+        }
+
         let (bytes, mime, file_name) = read_upload_file(&args.path)?;
         let response = self
             .client
@@ -249,10 +301,21 @@ impl CliApp {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let input = std::fs::read_to_string(&args.input)?;
         let payloads: Vec<CreateRaindrop> = serde_json::from_str(&input)?;
+
+        if self.is_dry_run() {
+            println!(
+                "{}",
+                CreateManyRaindropsPreview::new(&args.input, &payloads)
+            );
+
+            return Ok(());
+        }
+
         let response = self.client.raindrops().create_many(&payloads).await?;
 
         if response.data.is_empty() {
             println!("No raindrops created.");
+
             return Ok(());
         }
 
@@ -267,16 +330,25 @@ impl CliApp {
         &self,
         args: UpdateManyArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_dry_run() {
+            let selection = resolve_update_many_selection(&self.client, &args).await?;
+
+            println!("{}", UpdateManyRaindropsPreview::new(&selection, &args));
+
+            return Ok(());
+        }
+
         let outcome = execute_update_many(&self.client, &args).await?;
 
         if outcome.modified == 0 {
             println!("No raindrops matched the requested selectors.");
+
             return Ok(());
         }
 
         let selection = outcome.selection;
 
-        println!("matched: {}", selection.ids.len());
+        println!("matched: {}", selection.targets.len());
         println!("modified: {}", outcome.modified);
 
         if !selection.from_collections.is_empty() {
@@ -304,6 +376,17 @@ impl CliApp {
         &self,
         args: DeleteManyArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_dry_run() {
+            let targets = self.client.raindrops().get_many(&args.ids).await?.data;
+
+            println!(
+                "{}",
+                DeleteManyRaindropsPreview::new(args.collection_id, &targets)
+            );
+
+            return Ok(());
+        }
+
         let payload = DeleteManyRaindrops {
             ids: Some(args.ids.clone()),
             extra: HashMap::new(),
@@ -479,15 +562,15 @@ async fn fetch_all_raindrops_matching(
     Ok(all_items)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ResolvedUpdateManySelection {
-    ids: Vec<i64>,
-    from_collections: Vec<CollectionScope>,
-    excluded_collections: Vec<CollectionScope>,
-    search: Option<String>,
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedUpdateManySelection {
+    pub(crate) targets: Vec<Raindrop>,
+    pub(crate) from_collections: Vec<CollectionScope>,
+    pub(crate) excluded_collections: Vec<CollectionScope>,
+    pub(crate) search: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct UpdateManyOutcome {
     selection: ResolvedUpdateManySelection,
     modified: u64,
@@ -499,7 +582,7 @@ async fn execute_update_many(
 ) -> Result<UpdateManyOutcome, Box<dyn std::error::Error>> {
     let selection = resolve_update_many_selection(client, args).await?;
 
-    if selection.ids.is_empty() {
+    if selection.targets.is_empty() {
         return Ok(UpdateManyOutcome {
             selection,
             modified: 0,
@@ -507,7 +590,13 @@ async fn execute_update_many(
     }
 
     let payload = UpdateManyRaindrops {
-        ids: Some(selection.ids.clone()),
+        ids: Some(
+            selection
+                .targets
+                .iter()
+                .map(|target| target.id.into_inner())
+                .collect(),
+        ),
         collection: args.to_collection.map(TryInto::try_into).transpose()?,
         tags: (!args.tags.is_empty()).then_some(args.tags.clone()),
         extra: HashMap::new(),
@@ -549,7 +638,7 @@ async fn resolve_update_many_selection(
     }
 
     Ok(ResolvedUpdateManySelection {
-        ids: selected.into_keys().collect(),
+        targets: selected.into_values().collect(),
         from_collections: args.from_collection.clone(),
         excluded_collections: args.exclude_collection.clone(),
         search: args.search.clone(),
@@ -1174,14 +1263,23 @@ mod tests {
 
         assert_eq!(2, outcome.modified);
         assert_eq!(
-            ResolvedUpdateManySelection {
-                ids: vec![10, 12],
-                from_collections: vec![CollectionScope::id(42).unwrap()],
-                excluded_collections: vec![],
-                search: None,
-            },
-            outcome.selection
+            vec![10, 12],
+            outcome
+                .selection
+                .targets
+                .iter()
+                .map(|target| target.id.into_inner())
+                .collect::<Vec<_>>()
         );
+        assert_eq!(
+            vec![CollectionScope::id(42).unwrap()],
+            outcome.selection.from_collections
+        );
+        assert_eq!(
+            Vec::<CollectionScope>::new(),
+            outcome.selection.excluded_collections
+        );
+        assert_eq!(None, outcome.selection.search);
     }
 
     #[tokio::test]
@@ -1234,7 +1332,15 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(vec![10, 12, 15], outcome.selection.ids);
+        assert_eq!(
+            vec![10, 12, 15],
+            outcome
+                .selection
+                .targets
+                .iter()
+                .map(|target| target.id.into_inner())
+                .collect::<Vec<_>>()
+        );
         assert_eq!(3, outcome.modified);
     }
 
@@ -1280,7 +1386,15 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(vec![12], outcome.selection.ids);
+        assert_eq!(
+            vec![12],
+            outcome
+                .selection
+                .targets
+                .iter()
+                .map(|target| target.id.into_inner())
+                .collect::<Vec<_>>()
+        );
         assert_eq!(1, outcome.modified);
     }
 
@@ -1326,7 +1440,15 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(vec![10, 12], outcome.selection.ids);
+        assert_eq!(
+            vec![10, 12],
+            outcome
+                .selection
+                .targets
+                .iter()
+                .map(|target| target.id.into_inner())
+                .collect::<Vec<_>>()
+        );
         assert_eq!(Some("rust".to_string()), outcome.selection.search);
     }
 

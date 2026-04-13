@@ -2,19 +2,32 @@ use crate::Command;
 use crate::config::Config;
 use puddle::{Error, RaindropClient};
 
+pub(crate) struct RunContext {
+    pub(crate) is_dry_run: bool,
+}
+
 pub(crate) struct CliApp {
     pub(crate) config: Config,
     pub(crate) client: RaindropClient,
+    pub(crate) context: RunContext,
 }
 
 impl CliApp {
-    pub(crate) fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub(crate) fn new(context: RunContext) -> Result<Self, Box<dyn std::error::Error>> {
         let config = Config::load()?;
         let client = RaindropClient::builder()
             .access_token(config.values().access_token.clone())
             .build()?;
 
-        Ok(Self { config, client })
+        Ok(Self {
+            config,
+            client,
+            context,
+        })
+    }
+
+    pub(crate) fn is_dry_run(&self) -> bool {
+        self.context.is_dry_run
     }
 
     pub(crate) async fn run_command(

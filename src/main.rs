@@ -4,11 +4,12 @@ mod common;
 mod config;
 mod constants;
 mod filters;
+mod previews;
 mod raindrops;
 mod tags;
 mod user;
 
-use crate::app::CliApp;
+use crate::app::{CliApp, RunContext};
 use crate::config::{ConfigValues, global_config_path};
 use crate::constants::{
     AUTHORIZE_URL_BASE, DEFAULT_OAUTH_DEBUG_REDIRECT_URI, RAINDROP_INTEGRATIONS_URI,
@@ -25,6 +26,8 @@ use url::form_urlencoded;
 #[derive(Debug, Parser)]
 #[command(name = "puddle", version, about = "")]
 struct Cli {
+    #[arg(long = "dry-run", global = true)]
+    is_dry_run: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -94,7 +97,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", path.display());
         }
         command => {
-            let mut app = CliApp::new()?;
+            let context = RunContext {
+                is_dry_run: cli.is_dry_run,
+            };
+
+            let mut app = CliApp::new(context)?;
             app.run_command(command).await?;
         }
     }

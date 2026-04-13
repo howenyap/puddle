@@ -30,6 +30,49 @@ impl Raindrop {
                 .is_some_and(|value| value.id == i64::from(scope)),
         }
     }
+
+    pub fn change_lines(&self, payload: &UpdateRaindrop) -> Vec<String> {
+        let existing_title = self.title.as_deref().unwrap_or("(untitled)");
+        let mut changes = Vec::new();
+
+        if let Some(title) = payload.title.as_deref() {
+            changes.push(format!("Title: {existing_title} -> {title}"));
+        }
+
+        if let Some(excerpt) = payload.excerpt.as_deref() {
+            let existing_excerpt = self.excerpt.as_deref().unwrap_or("(none)");
+
+            changes.push(format!("Excerpt: {existing_excerpt} -> {excerpt}"));
+        }
+
+        if let Some(collection) = payload.collection.as_ref() {
+            let from_collection = self
+                .collection
+                .as_ref()
+                .map(|value| CollectionScope::from(value.id).to_string())
+                .unwrap_or_else(|| "(none)".to_string());
+            let to_collection = CollectionScope::from(collection.id);
+
+            changes.push(format!("Collection: {from_collection} -> {to_collection}"));
+        }
+
+        if let Some(tags) = payload.tags.as_ref() {
+            let existing_tags = if self.tags.is_empty() {
+                "(none)".to_string()
+            } else {
+                self.tags.join(", ")
+            };
+            let updated_tags = if tags.is_empty() {
+                "(none)".to_string()
+            } else {
+                tags.join(", ")
+            };
+
+            changes.push(format!("Tags: {existing_tags} -> {updated_tags}"));
+        }
+
+        changes
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

@@ -1,4 +1,5 @@
 use crate::app::CliApp;
+use crate::previews::{DeleteTagPreview, RenameTagPreview};
 use clap::{Args, Subcommand};
 use puddle::models::tags::Tag;
 
@@ -63,6 +64,12 @@ impl CliApp {
     }
 
     async fn tags_rename(&self, args: RenameTagArgs) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_dry_run() {
+            println!("{}", RenameTagPreview::new(&args));
+
+            return Ok(());
+        }
+
         let response = self
             .client
             .tags()
@@ -74,6 +81,12 @@ impl CliApp {
     }
 
     async fn tags_delete(&self, args: DeleteTagArgs) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_dry_run() {
+            println!("{}", DeleteTagPreview::new(&args));
+
+            return Ok(());
+        }
+
         let response = self
             .client
             .tags()

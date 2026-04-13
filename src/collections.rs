@@ -1,5 +1,9 @@
 use crate::app::CliApp;
 use crate::common::{display_text, read_upload_file};
+use crate::previews::{
+    CreateCollectionPreview, DeleteCollectionPreview, UpdateCollectionPreview,
+    UploadCollectionCoverPreview,
+};
 use clap::{Args, Subcommand};
 use puddle::models::collections::{Collection, CreateCollection, UpdateCollection};
 use puddle::models::common::CollectionScope;
@@ -99,6 +103,13 @@ impl CliApp {
             parent: args.parent,
             extra: HashMap::new(),
         };
+
+        if self.is_dry_run() {
+            println!("{}", CreateCollectionPreview::new(&payload));
+
+            return Ok(());
+        }
+
         let response = self.client.collections().create(&payload).await?;
         print_collection_detail(&response.data);
 
@@ -114,6 +125,23 @@ impl CliApp {
             parent: args.parent,
             extra: HashMap::new(),
         };
+
+        if self.is_dry_run() {
+            let existing_collection = self
+                .client
+                .collections()
+                .get(CollectionScope::from(args.id))
+                .await?
+                .data;
+
+            println!(
+                "{}",
+                UpdateCollectionPreview::new(&existing_collection, &payload)
+            );
+
+            return Ok(());
+        }
+
         let response = self.client.collections().update(args.id, &payload).await?;
         print_collection_detail(&response.data);
 
@@ -124,6 +152,19 @@ impl CliApp {
         &self,
         args: DeleteCollectionArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_dry_run() {
+            let existing_collection = self
+                .client
+                .collections()
+                .get(CollectionScope::from(args.id))
+                .await?
+                .data;
+
+            println!("{}", DeleteCollectionPreview::new(&existing_collection));
+
+            return Ok(());
+        }
+
         let response = self.client.collections().delete(args.id).await?;
         println!("deleted: {}", response.data);
 
@@ -134,6 +175,23 @@ impl CliApp {
         &self,
         args: UploadCollectionCoverArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_dry_run() {
+            let _ = read_upload_file(&args.path)?;
+            let existing_collection = self
+                .client
+                .collections()
+                .get(CollectionScope::from(args.id))
+                .await?
+                .data;
+
+            println!(
+                "{}",
+                UploadCollectionCoverPreview::new(&existing_collection, &args.path)
+            );
+
+            return Ok(());
+        }
+
         let (bytes, mime, file_name) = read_upload_file(&args.path)?;
         let response = self
             .client
@@ -189,7 +247,6 @@ fn format_collection_summary(item: &Collection) -> String {
 
     parts.join(" | ")
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

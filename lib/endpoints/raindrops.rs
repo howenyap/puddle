@@ -1,6 +1,6 @@
 use crate::client::RaindropClient;
 use crate::error::Error;
-use crate::http::Response;
+use crate::http::{Response, ResponseMetadata};
 use crate::models::common::{
     BoolResponse, CollectionScope, ItemResponse, ItemsResponse, ModifiedResponse,
 };
@@ -31,6 +31,20 @@ impl RaindropsApi {
         Ok(Response {
             data: res.data.item,
             meta: res.meta,
+        })
+    }
+
+    pub async fn get_many(&self, ids: &[i64]) -> Result<Response<Vec<Raindrop>>, Error> {
+        let mut items = Vec::with_capacity(ids.len());
+
+        for id in ids {
+            let response = self.get(RaindropId::new(*id)).await?;
+            items.push(response.data);
+        }
+
+        Ok(Response {
+            data: items,
+            meta: ResponseMetadata::default(),
         })
     }
 
