@@ -1,0 +1,16 @@
+---
+source: tests/previews_snapshots.rs
+expression: "DeleteManyRaindropsPreview::new(CollectionScope::Unsorted,\n&targets).to_string()"
+---
+Dry Run: Delete Many Raindrops
+Matched: 2
+
+Scope
+Collection: Unsorted
+
+Matched Targets
+ID: 42
+Title: Rust article
+
+ID: 43
+Title: Server notes

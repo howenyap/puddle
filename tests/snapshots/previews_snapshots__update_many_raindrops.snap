@@ -1,0 +1,26 @@
+---
+source: tests/previews_snapshots.rs
+expression: "UpdateManyRaindropsPreview::new(&selection, &args).to_string()"
+---
+Dry Run: Update Many Raindrops
+Matched: 2
+
+Scope
+From Collections: Unsorted, 7
+Excluded Collections: Trash
+Search: rust async
+
+Matched Targets
+- #42 Rust article
+- #43 (untitled)
+
+Changes
+ID: 42
+Title: Rust article
+Collection: Unsorted -> 7
+Tags: rust, cli -> backend, docs
+
+ID: 43
+Title: (untitled)
+Collection: 11 -> 7
+Tags: inbox -> backend, docs

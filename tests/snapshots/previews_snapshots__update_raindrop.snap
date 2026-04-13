@@ -1,0 +1,14 @@
+---
+source: tests/previews_snapshots.rs
+expression: "UpdateRaindropPreview::new(&full_raindrop(), &payload).to_string()"
+---
+Dry Run: Update Raindrop
+Target
+ID: 42
+Title: Rust article
+
+Changes
+Title: Rust article -> Better title
+Excerpt: Original excerpt -> Updated excerpt
+Collection: Unsorted -> 7
+Tags: rust, cli -> backend, docs

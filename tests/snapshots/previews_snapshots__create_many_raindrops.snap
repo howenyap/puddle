@@ -1,0 +1,14 @@
+---
+source: tests/previews_snapshots.rs
+expression: "CreateManyRaindropsPreview::new(&input, &payloads).to_string()"
+---
+Dry Run: Create Many Raindrops
+Input: fixtures/create-many.json
+Count: 2
+
+Items to Create
+Title: Saved article
+Link: https://example.com/create
+
+Title: (untitled)
+Link: https://example.com/untitled

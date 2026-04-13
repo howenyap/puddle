@@ -74,6 +74,9 @@ impl Display for UpdateRaindropPreview<'_> {
             writeln!(f)?;
             writeln!(f, "Changes")?;
             write!(f, "{}", changes.join("\n"))?;
+        } else {
+            writeln!(f)?;
+            write!(f, "No changes found.")?;
         }
 
         Ok(())
@@ -168,18 +171,20 @@ impl Display for CreateManyRaindropsPreview<'_> {
         writeln!(f, "Input: {input}")?;
         writeln!(f, "Count: {count}")?;
         writeln!(f)?;
-        writeln!(f, "Matched Targets")?;
+        writeln!(f, "Items to Create")?;
 
         for (index, payload) in self.payloads.iter().enumerate() {
             if index > 0 {
                 writeln!(f)?;
+                writeln!(f)?;
             }
 
-            write!(
+            writeln!(
                 f,
-                "- {}",
-                display_text(payload.title.as_deref(), payload.link.as_str())
+                "Title: {}",
+                display_text(payload.title.as_deref(), "(untitled)")
             )?;
+            write!(f, "Link: {}", payload.link)?;
         }
 
         Ok(())
@@ -306,13 +311,19 @@ impl Display for DeleteManyRaindropsPreview<'_> {
         writeln!(f, "Collection: {collection_scope}")?;
         writeln!(f)?;
         writeln!(f, "Matched Targets")?;
+        let targets = self
+            .targets
+            .iter()
+            .map(|target| {
+                let target_id = target.id;
+                let target_title = display_text(target.title.as_deref(), "(untitled)");
 
-        for target in self.targets {
-            let target_id = target.id;
-            let target_title = display_text(target.title.as_deref(), "(untitled)");
+                format!("ID: {target_id}\nTitle: {target_title}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
 
-            writeln!(f, "- #{target_id} {target_title}")?;
-        }
+        write!(f, "{targets}")?;
 
         Ok(())
     }

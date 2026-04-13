@@ -1,0 +1,9 @@
+---
+source: tests/previews_snapshots.rs
+expression: "UploadCollectionCoverPreview::new(&full_collection(), &path).to_string()"
+---
+Dry Run: Upload Collection Cover
+Target
+ID: 12
+Title: Reading list
+Path: fixtures/report.pdf

@@ -1,0 +1,6 @@
+---
+source: tests/previews_snapshots.rs
+expression: "UploadRaindropFilePreview::new(&path).to_string()"
+---
+Dry Run: Upload Raindrop File
+Path: fixtures/report.pdf

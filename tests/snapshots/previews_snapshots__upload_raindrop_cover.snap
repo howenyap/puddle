@@ -1,0 +1,9 @@
+---
+source: tests/previews_snapshots.rs
+expression: "UploadRaindropCoverPreview::new(&full_raindrop(), &path).to_string()"
+---
+Dry Run: Upload Raindrop Cover
+Target
+ID: 42
+Title: Rust article
+Path: fixtures/report.pdf

@@ -1,0 +1,8 @@
+---
+source: tests/previews_snapshots.rs
+expression: "DeleteRaindropPreview::new(&full_raindrop()).to_string()"
+---
+Dry Run: Delete Raindrop
+Target
+ID: 42
+Title: Rust article

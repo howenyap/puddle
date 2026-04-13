@@ -29,4 +29,5 @@ toml = "1"
 url = "2.5.8"
 
 [dev-dependencies]
+insta = "1.47.2"
 wiremock = "0.6.5"

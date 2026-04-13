@@ -1,0 +1,9 @@
+---
+source: tests/previews_snapshots.rs
+expression: "CreateRaindropPreview::new(&payload).to_string()"
+---
+Dry Run: Create Raindrop
+Link: https://example.com/create
+Title: Saved article
+Collection: 7
+Tags: rust, backend

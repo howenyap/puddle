@@ -1,0 +1,11 @@
+---
+source: tests/previews_snapshots.rs
+expression: "RenameTagPreview::new(&args).to_string()"
+---
+Dry Run: Rename Tag
+Target
+Collection: 7
+Tag: api
+
+Changes
+Tag: api -> backend

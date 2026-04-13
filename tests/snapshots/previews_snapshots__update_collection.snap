@@ -1,0 +1,12 @@
+---
+source: tests/previews_snapshots.rs
+expression: "UpdateCollectionPreview::new(&full_collection(), &payload).to_string()"
+---
+Dry Run: Update Collection
+Target
+ID: 12
+Title: Reading list
+
+Changes
+Title: Reading list -> Architecture notes
+Parent: 5 -> 8

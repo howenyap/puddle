@@ -1,0 +1,8 @@
+---
+source: tests/previews_snapshots.rs
+expression: "DeleteTagPreview::new(&args).to_string()"
+---
+Dry Run: Delete Tag
+Target
+Collection: 7
+Tag: deprecated

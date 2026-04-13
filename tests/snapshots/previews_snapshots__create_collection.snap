@@ -1,0 +1,7 @@
+---
+source: tests/previews_snapshots.rs
+expression: "CreateCollectionPreview::new(&payload).to_string()"
+---
+Dry Run: Create Collection
+Title: Architecture
+Parent: 5

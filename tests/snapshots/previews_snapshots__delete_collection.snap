@@ -1,0 +1,8 @@
+---
+source: tests/previews_snapshots.rs
+expression: "DeleteCollectionPreview::new(&full_collection()).to_string()"
+---
+Dry Run: Delete Collection
+Target
+ID: 12
+Title: Reading list
